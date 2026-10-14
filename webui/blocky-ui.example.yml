@@ -1,0 +1,110 @@
+# Copy this file to blocky-ui.yml and set the env BLOCKY_UI_CONFIG to its path.
+# For a basic setup, only servers and a url are needed.
+
+servers:
+  # Give each server a short key, such as nas, raspberry, office or similars.
+  nas:
+    # Name of the server, displayed on the UI. Optional
+    name: NAS
+    # The address of this Blocky instance
+    # Statistics and commands use each server's Blocky API. Enable statistics
+    # in Blocky's configuration for overview cards and, without configured logs,
+    # Top Lists and a 24-hour chart of hourly total and blocked queries.
+    # Statistics reset when Blocky restarts.
+    # https://0xerr0r.github.io/blocky/latest/configuration/#statistics
+    url: http://blocky:4000
+
+    # Optional headers for the Blocky API, for example authentication.
+    # headers:
+    #   Authorization: Bearer your-token-here
+
+    # Optional connection to this server's stored query logs.
+    # Enables query history, longer chart ranges and filters.
+    # Requires query logging in Blocky:
+    # https://0xerr0r.github.io/blocky/latest/configuration/#query-logging
+    logs:
+      # Name of an entry under logSources below.
+      source: home
+      # When servers share a log source, use the hostname recorded by Blocky
+      # to tell their queries apart. For VictoriaLogs, use the instance field.
+      # Omit hostname if this source contains logs from only this server.
+      hostname: blocky
+
+  # Add more entries under servers to connect other Blocky instances.
+  # raspberry:
+  #   name: Raspberry Pi
+  #   url: http://raspberry:4000
+  #   logs:
+  #     source: postgresql
+  #     hostname: blocky-raspberry
+
+# Define each database or log folder once, even if several servers use it.
+# This lets BlockyUI combine their history without counting the source twice.
+# Records that cannot be matched to a server still appear as Unknown on the UI.
+logSources:
+  # Same name as logs.source above.
+  home:
+    # Match queryLog.type in Blocky's configuration.
+    type: mysql
+    # Connect to the same database as Blocky's queryLog.target.
+    # MySQL, PostgreSQL, and Timescale support this object format.
+    # All string values in target accept file: or file:// references, including
+    # host, username, database, password, and nested options.
+    # Add !raw as an escape hatch when the value itself must start with file:.
+    target:
+      # Address accessible from BlockyUI. PostgreSQL and Timescale currently
+      # require a hostname or IPv4 address due to an upstream driver limitation.
+      # https://github.com/porsager/postgres/pull/663
+      host: mariadb
+      # Optional. Uses the database driver's default when omitted.
+      port: 3306
+      username: blocky
+      # Use the plain password, without URL encoding.
+      password: change-me
+      database: blocky
+      # Optional native driver settings. Names and value types depend on the driver.
+      # These override provider defaults; the connection fields above take priority.
+      # PostgreSQL examples include ssl: require and connect_timeout: 15.
+      # options:
+      #   connectionLimit: 5
+      #   connectTimeout: 30000
+      #   ssl:
+      #     ca: file:/run/secrets/db_ca.pem
+      #     cert: file:/run/secrets/db_cert.pem
+      #     key: file:/run/secrets/db_key.pem
+
+    # You can also use a connection URL or read it from a secret file.
+    # For MySQL, rewrite Blocky's connection string as a URL:
+    # blocky:change-me@tcp(mariadb:3306)/blocky becomes the URL below.
+    # target: mysql://blocky:change-me@mariadb:3306/blocky
+    # target: file:/run/secrets/query_log_target
+
+  # PostgreSQL and Timescale use PostgreSQL connection URLs.
+  # postgres:
+  #   type: postgresql
+  #   target: postgresql://blocky:change-me@database:5432/blocky
+  # timescale:
+  #   type: timescale
+  #   target: postgresql://blocky:change-me@database:5432/blocky
+
+  # File paths must be accessible to the BlockyUI process.
+  # Use !raw for SQLite URIs; plain paths such as /logs/blocky.db need no tag.
+  # sqlite:
+  #   type: sqlite
+  #   target: !raw "file:/logs/blocky.db?mode=ro"
+  # daily:
+  #   type: csv
+  #   target: /logs/daily
+  # clients:
+  #   type: csv-client
+  #   target: /logs/clients
+
+  # For Blocky's queryLog.type: console, with logs collected by VictoriaLogs.
+  # target is the VictoriaLogs URL, not Blocky's queryLog.target.
+  # console:
+  #   type: console
+  #   consoleProvider: victorialogs
+  #   target: http://victoria-logs:9428
+
+# Optional label for the browser tab, separate from individual server names.
+# instanceName: Home DNS

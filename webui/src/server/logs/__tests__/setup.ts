@@ -1,0 +1,490 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  MySqlContainer,
+  type StartedMySqlContainer,
+} from "@testcontainers/mysql";
+import {
+  PostgreSqlContainer,
+  type StartedPostgreSqlContainer,
+} from "@testcontainers/postgresql";
+import Database from "better-sqlite3";
+import { sql } from "drizzle-orm";
+import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
+import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
+import { createConnection } from "mysql2/promise";
+import postgres from "postgres";
+
+import {
+  GenericContainer,
+  type StartedTestContainer,
+  Wait,
+} from "testcontainers";
+import { createSeedData } from "~/server/logs/__tests__/seed-data";
+import { CsvClientLogProvider } from "~/server/logs/csv/client-provider";
+import { CsvLogProvider } from "~/server/logs/csv/provider";
+import { MySQLLogProvider } from "~/server/logs/mysql/provider";
+import { PostgreSQLLogProvider } from "~/server/logs/postgres/provider";
+import { logEntries as pgLogEntries } from "~/server/logs/postgres/schema";
+import { SQLiteLogProvider } from "~/server/logs/sqlite/provider";
+import { logEntries as sqliteLogEntries } from "~/server/logs/sqlite/schema";
+import type { LogEntry, LogProvider } from "~/server/logs/types";
+import { VictoriaLogsProvider } from "~/server/logs/victorialogs/provider";
+
+const CREATE_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS log_entries (
+    id INT AUTO_INCREMENT NOT NULL PRIMARY KEY,
+    request_ts DATETIME(3) NULL,
+    client_ip LONGTEXT NULL,
+    client_name VARCHAR(191) NULL,
+    duration_ms BIGINT NULL,
+    reason LONGTEXT NULL,
+    response_type VARCHAR(191) NULL,
+    question_type LONGTEXT NULL,
+    question_name LONGTEXT NULL,
+    effective_tldp LONGTEXT NULL,
+    answer LONGTEXT NULL,
+    response_code LONGTEXT NULL,
+    hostname LONGTEXT NULL,
+    INDEX idx_log_entries_request_ts (request_ts),
+    INDEX idx_log_entries_client_name (client_name),
+    INDEX idx_log_entries_response_type (response_type)
+  )
+`;
+
+const INSERT_SQL = `
+  INSERT INTO log_entries
+    (request_ts, client_ip, client_name, duration_ms, reason, response_type,
+     question_type, question_name, effective_tldp, answer, response_code, hostname)
+  VALUES ?
+`;
+
+export function formatDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// Field order matches csv/utils.ts parseLogLine. effectiveTldp and id are
+// excluded to match Blocky's actual CSV output format.
+export function entryToCsvLine(entry: LogEntry): string {
+  const fields = [
+    entry.requestTs ?? "",
+    entry.clientIp ?? "",
+    entry.clientName ?? "",
+    entry.durationMs === null ? "" : String(entry.durationMs),
+    entry.reason ?? "",
+    entry.questionName ?? "",
+    entry.answer ?? "",
+    entry.responseCode ?? "",
+    entry.responseType ?? "",
+    entry.questionType ?? "",
+    entry.hostname ?? "",
+  ];
+  return fields.join("\t");
+}
+
+export function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
+  return {
+    requestTs: new Date(Date.now() - 60_000).toISOString(),
+    clientIp: "10.0.0.1",
+    clientName: "test-client",
+    durationMs: 5,
+    reason: "RESOLVED",
+    questionName: "test-domain.com",
+    answer: "1.2.3.4",
+    responseCode: "NOERROR",
+    responseType: "RESOLVED",
+    questionType: "A",
+    hostname: "test",
+    effectiveTldp: null,
+    id: null,
+    ...overrides,
+  };
+}
+
+function isoToMysqlDatetime(iso: string): string {
+  return iso.replace("T", " ").replace("Z", "");
+}
+
+function isoToSqliteDatetime(iso: string): string {
+  return isoToMysqlDatetime(iso);
+}
+
+function entryToDatabaseValues(
+  entry: LogEntry,
+  formatRequestTs: (requestTs: string) => string = (requestTs) => requestTs,
+) {
+  return {
+    requestTs: entry.requestTs ? formatRequestTs(entry.requestTs) : null,
+    clientIp: entry.clientIp,
+    clientName: entry.clientName,
+    durationMs: entry.durationMs,
+    reason: entry.reason,
+    responseType: entry.responseType,
+    questionType: entry.questionType,
+    questionName: entry.questionName,
+    effectiveTldp: entry.effectiveTldp,
+    answer: entry.answer,
+    responseCode: entry.responseCode,
+    hostname: entry.hostname,
+  };
+}
+
+// Field order must match INSERT_SQL column order exactly
+function entryToMysqlRow(entry: LogEntry): unknown[] {
+  return [
+    entry.requestTs ? isoToMysqlDatetime(entry.requestTs) : null,
+    entry.clientIp ?? null,
+    entry.clientName ?? null,
+    entry.durationMs ?? null,
+    entry.reason ?? null,
+    entry.responseType ?? null,
+    entry.questionType ?? null,
+    entry.questionName ?? null,
+    entry.effectiveTldp ?? null,
+    entry.answer ?? null,
+    entry.responseCode ?? null,
+    entry.hostname ?? null,
+  ];
+}
+
+function databaseConnectionUrl(
+  container: StartedMySqlContainer | StartedPostgreSqlContainer,
+  protocol: "mysql" | "postgresql",
+  password: string,
+) {
+  const url = new URL(`${protocol}://localhost`);
+  url.hostname = container.getHost();
+  url.port = String(container.getPort());
+  url.username = encodeURIComponent(container.getUsername());
+  url.password = encodeURIComponent(password);
+  url.pathname = encodeURIComponent(container.getDatabase());
+  return url.href;
+}
+
+export async function setupMysql(
+  entries: LogEntry[],
+  password = "test",
+): Promise<{
+  provider: MySQLLogProvider;
+  container: StartedMySqlContainer;
+}> {
+  const container = await new MySqlContainer("mysql:8.0")
+    .withDatabase("test_db")
+    .withUserPassword(password)
+    // Podman lists the image's X Protocol port even when it is not mapped.
+    // Testcontainers waits for every listed port, so map this one as well.
+    .withExposedPorts(33_060)
+    .start();
+
+  try {
+    const target = databaseConnectionUrl(container, "mysql", password);
+    const connection = await createConnection(target);
+
+    try {
+      await connection.execute(CREATE_TABLE_SQL);
+
+      for (let offset = 0; offset < entries.length; offset += 1000) {
+        const rows = entries.slice(offset, offset + 1000).map(entryToMysqlRow);
+        // biome-ignore lint/performance/noAwaitInLoops: Limit seed writes to one batch in flight.
+        await connection.query(INSERT_SQL, [rows]);
+      }
+    } finally {
+      await connection.end();
+    }
+
+    const provider = new MySQLLogProvider({ target });
+    return { provider, container };
+  } catch (error) {
+    await container.stop();
+    throw error;
+  }
+}
+
+export async function setupPostgres(
+  entries: LogEntry[],
+  password = "test",
+): Promise<{
+  provider: PostgreSQLLogProvider;
+  container: StartedPostgreSqlContainer;
+}> {
+  const container = await new PostgreSqlContainer("postgres:16")
+    .withDatabase("test_db")
+    .withPassword(password)
+    // Rootless Podman may not run the engine's scheduled health checks.
+    // Wait for the temporary and final servers, and the final TCP listener.
+    .withWaitStrategy(
+      Wait.forAll([
+        Wait.forLogMessage("database system is ready to accept connections", 2),
+        Wait.forListeningPorts(),
+      ]),
+    )
+    .start();
+
+  try {
+    const target = databaseConnectionUrl(container, "postgresql", password);
+    const conn = postgres(target);
+    const db = drizzlePg(conn);
+
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS log_entries (
+          request_ts TIMESTAMPTZ NOT NULL,
+          client_ip TEXT NULL,
+          client_name TEXT NULL,
+          duration_ms BIGINT NULL,
+          reason TEXT NULL,
+          response_type TEXT NULL,
+          question_type TEXT NULL,
+          question_name TEXT NULL,
+          effective_tldp TEXT NULL,
+          answer TEXT NULL,
+          response_code TEXT NULL,
+          hostname TEXT NULL
+        )
+      `);
+
+      if (entries.length > 0) {
+        await db
+          .insert(pgLogEntries)
+          .values(entries.map((entry) => entryToDatabaseValues(entry)));
+      }
+    } finally {
+      await conn.end();
+    }
+
+    const provider = new PostgreSQLLogProvider({ target });
+    return { provider, container };
+  } catch (error) {
+    await container.stop();
+    throw error;
+  }
+}
+
+export function setupSqlite(entries: LogEntry[]): {
+  provider: SQLiteLogProvider;
+  filePath: string;
+} {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-test-"));
+  const filePath = path.join(directory, "query-log.db");
+  const dbFile = new Database(filePath);
+  const db = drizzleSqlite(dbFile);
+
+  try {
+    db.run(sql`
+      CREATE TABLE IF NOT EXISTS log_entries (
+        request_ts datetime NOT NULL,
+        client_ip TEXT NULL,
+        client_name TEXT NULL,
+        duration_ms INTEGER NULL,
+        reason TEXT NULL,
+        response_type TEXT NULL,
+        question_type TEXT NULL,
+        question_name TEXT NULL,
+        effective_tldp TEXT NULL,
+        answer TEXT NULL,
+        response_code TEXT NULL,
+        hostname TEXT NULL
+      )
+    `);
+    db.run(
+      sql`CREATE INDEX IF NOT EXISTS idx_log_entries_request_ts ON log_entries (request_ts)`,
+    );
+    db.run(
+      sql`CREATE INDEX IF NOT EXISTS idx_log_entries_client_name ON log_entries (client_name)`,
+    );
+    db.run(
+      sql`CREATE INDEX IF NOT EXISTS idx_log_entries_response_type ON log_entries (response_type)`,
+    );
+
+    if (entries.length > 0) {
+      db.insert(sqliteLogEntries)
+        .values(
+          entries.map((entry) =>
+            entryToDatabaseValues(entry, isoToSqliteDatetime),
+          ),
+        )
+        .run();
+    }
+  } finally {
+    dbFile.close();
+  }
+
+  const provider = new SQLiteLogProvider({ filePath });
+  return { provider, filePath };
+}
+
+export function setupCsv(entries: LogEntry[]): {
+  provider: CsvLogProvider;
+  directory: string;
+} {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "csv-test-"));
+  const chronological = [...entries].reverse();
+  const lines = chronological.map(entryToCsvLine);
+  fs.writeFileSync(path.join(directory, "test.log"), lines.join("\n"));
+
+  const provider = new CsvLogProvider({ directory });
+  return { provider, directory };
+}
+
+function setupCsvClient(entries: LogEntry[]): {
+  provider: CsvClientLogProvider;
+  directory: string;
+} {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "csv-client-test-"));
+  const grouped = new Map<string, LogEntry[]>();
+  for (const entry of entries) {
+    const date = formatDate(new Date(entry.requestTs ?? Date.now()));
+    const clientKey = `${date}_${entry.clientName ?? "unknown"}`;
+    const existing = grouped.get(clientKey) ?? [];
+    existing.push(entry);
+    grouped.set(clientKey, existing);
+  }
+
+  for (const [clientName, clientEntries] of grouped) {
+    const fileName = `${clientName}.log`;
+    const chronological = [...clientEntries].reverse();
+    const lines = chronological.map(entryToCsvLine);
+    fs.writeFileSync(path.join(directory, fileName), lines.join("\n"));
+  }
+
+  const provider = new CsvClientLogProvider({ directory });
+  return { provider, directory };
+}
+
+async function setupVictoriaLogs(entries: LogEntry[]): Promise<{
+  provider: VictoriaLogsProvider;
+  container: StartedTestContainer;
+}> {
+  const container = await new GenericContainer(
+    "victoriametrics/victoria-logs:v1.48.0",
+  )
+    .withExposedPorts(9428)
+    .withCommand(["-retentionPeriod=365d"])
+    .withWaitStrategy(Wait.forHttp("/", 9428).forStatusCode(200))
+    .start();
+
+  const port = container.getMappedPort(9428);
+  const url = `http://localhost:${port}`;
+
+  try {
+    // The app label is intentionally omitted — the provider filters on the blocky-native
+    // prefix field rather than infrastructure labels so it works in any environment.
+    const lines = entries.map((entry) =>
+      JSON.stringify({
+        _time: entry.requestTs ?? new Date().toISOString(),
+        _msg: "seed",
+        prefix: "queryLog",
+        client_ip: entry.clientIp ?? "",
+        client_names: entry.clientName ?? "",
+        duration_ms: entry.durationMs === null ? "" : String(entry.durationMs),
+        response_reason: entry.reason ?? "",
+        instance: entry.hostname ?? "",
+        question_name: entry.questionName ?? "",
+        answer: entry.answer ?? "",
+        response_code: entry.responseCode ?? "",
+        response_type: entry.responseType ?? "",
+        question_type: entry.questionType ?? "",
+      }),
+    );
+
+    const seedRes = await fetch(`${url}/insert/jsonline`, {
+      method: "POST",
+      body: lines.join("\n"),
+      headers: { "Content-Type": "application/stream+json" },
+    });
+    if (!seedRes.ok) {
+      throw new Error(
+        `VictoriaLogs seed failed: ${seedRes.status} ${await seedRes.text()}`,
+      );
+    }
+
+    // VL indexing is async — poll until all entries are indexed (max 10s).
+    // Query counts all prefix:queryLog entries (no field wildcards so that
+    // entries with empty/null fields are included in the count).
+    const deadline = Date.now() + 10_000;
+    let lastCount = 0;
+    while (Date.now() < deadline) {
+      // biome-ignore lint/performance/noAwaitInLoops: Poll readiness until the previous insert becomes searchable.
+      const resp = await fetch(
+        `${url}/select/logsql/query?query=prefix%3AqueryLog+%7C+stats+count()+as+n`,
+      );
+      if (resp.ok) {
+        const text = await resp.text();
+        const parsed = text.trim()
+          ? (JSON.parse(text.trim()) as { n?: string })
+          : null;
+        lastCount = parsed ? Number(parsed.n) : 0;
+        if (lastCount >= entries.length) {
+          break;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    if (lastCount < entries.length) {
+      throw new Error(
+        `VictoriaLogs indexing timed out: expected ${entries.length} entries, got ${lastCount} after 10s (url: ${url})`,
+      );
+    }
+
+    const provider = new VictoriaLogsProvider({ url });
+    return { provider, container };
+  } catch (error) {
+    await container.stop();
+    throw error;
+  }
+}
+
+export async function setupProviders(): Promise<{
+  providers: Map<string, LogProvider>;
+  seedData: LogEntry[];
+  cleanup: () => Promise<void>;
+}> {
+  const seedData = createSeedData();
+
+  const [
+    mysqlResult,
+    postgresResult,
+    sqliteResult,
+    csvResult,
+    csvClientResult,
+    vlResult,
+  ] = await Promise.all([
+    setupMysql(seedData),
+    setupPostgres(seedData),
+    Promise.resolve(setupSqlite(seedData)),
+    Promise.resolve(setupCsv(seedData)),
+    Promise.resolve(setupCsvClient(seedData)),
+    setupVictoriaLogs(seedData),
+  ]);
+
+  const providers = new Map<string, LogProvider>([
+    ["mysql", mysqlResult.provider],
+    ["postgres", postgresResult.provider],
+    ["sqlite", sqliteResult.provider],
+    ["csv", csvResult.provider],
+    ["csv-client", csvClientResult.provider],
+    ["victorialogs", vlResult.provider],
+  ]);
+
+  const cleanup = async () => {
+    await mysqlResult.provider.close?.();
+    await mysqlResult.container.stop();
+    await postgresResult.provider.close?.();
+    await postgresResult.container.stop();
+    await sqliteResult.provider.close?.();
+    fs.rmSync(path.dirname(sqliteResult.filePath), {
+      recursive: true,
+      force: true,
+    });
+    fs.rmSync(csvResult.directory, { recursive: true, force: true });
+    fs.rmSync(csvClientResult.directory, { recursive: true, force: true });
+    await vlResult.container.stop();
+  };
+
+  return { providers, seedData, cleanup };
+}

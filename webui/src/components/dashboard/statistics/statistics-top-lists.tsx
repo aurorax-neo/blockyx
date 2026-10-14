@@ -1,0 +1,159 @@
+"use client";
+
+import { Globe, ListOrdered, type LucideIcon, Users } from "lucide-react";
+import { useState } from "react";
+
+import { useDashboardServers } from "~/components/dashboard/server-context";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import {
+  TopListCard,
+  TopListEntry,
+  type TopListFilter,
+  type TopListFilterControls,
+  TopListsSection,
+} from "./top-list";
+
+const DISPLAYED_ENTRIES = 5;
+
+interface NameCount {
+  name: string;
+  count: number;
+}
+
+interface StatisticsTopListProps {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  entries: NameCount[];
+  isLoading: boolean;
+  filterControls?: TopListFilterControls;
+}
+
+function StatisticsTopList({
+  title,
+  description,
+  icon,
+  entries,
+  isLoading,
+  filterControls,
+}: StatisticsTopListProps) {
+  const displayedEntries = entries.slice(0, DISPLAYED_ENTRIES);
+  const maxCount = displayedEntries[0]?.count ?? 0;
+
+  return (
+    <TopListCard
+      title={title}
+      description={description}
+      icon={icon}
+      filterControls={filterControls}
+      isLoading={isLoading}
+      isEmpty={displayedEntries.length === 0}
+      skeletonRows={DISPLAYED_ENTRIES}
+    >
+      <div className="-my-1.5">
+        {displayedEntries.map((entry) => {
+          const width = maxCount > 0 ? (entry.count / maxCount) * 100 : 0;
+
+          return (
+            <TopListEntry
+              key={entry.name}
+              name={entry.name}
+              count={entry.count}
+              details={
+                <div className="flex items-center justify-between gap-4">
+                  <span className="font-mono text-sm">{entry.name}</span>
+                  <span className="shrink-0 font-medium tabular-nums">
+                    {entry.count.toLocaleString()}
+                  </span>
+                </div>
+              }
+            >
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-[var(--chart-1)]/75 transition-all duration-300"
+                  style={{ width: `${width}%` }}
+                />
+              </div>
+            </TopListEntry>
+          );
+        })}
+      </div>
+    </TopListCard>
+  );
+}
+
+export function StatisticsTopLists() {
+  const [domainFilter, setDomainFilter] = useState<TopListFilter>("all");
+  const dashboard = useDashboardServers();
+  const [serverId, setServerId] = useState<string>();
+  const available =
+    dashboard.statistics?.flatMap((result) =>
+      result.success ? [{ serverId: result.serverId, data: result.data }] : [],
+    ) ?? [];
+  const current =
+    available.find((result) => result.serverId === serverId) ?? available[0];
+  const snapshot = current?.data;
+  const isLoading = dashboard.statisticsLoading;
+
+  if (!(isLoading || snapshot)) {
+    return null;
+  }
+
+  let domainEntries = snapshot?.topLists.domains ?? [];
+  let domainDescription = "Most frequently queried domains";
+
+  if (domainFilter === "blocked") {
+    domainEntries = snapshot?.topLists.blockedDomains ?? [];
+    domainDescription = "Most frequently blocked domains";
+  }
+
+  return (
+    <TopListsSection
+      description="Most active domains and clients in the last 24 hours"
+      icon={ListOrdered}
+      controls={
+        available.length > 1 ? (
+          <Select value={current?.serverId} onValueChange={setServerId}>
+            <SelectTrigger
+              aria-label="Top lists server"
+              className="w-full sm:w-48"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {available.map((result) => (
+                <SelectItem key={result.serverId} value={result.serverId}>
+                  {dashboard.servers.find(
+                    (server) => server.id === result.serverId,
+                  )?.name ?? result.serverId}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : undefined
+      }
+    >
+      <StatisticsTopList
+        title="Top Domains"
+        description={domainDescription}
+        icon={Globe}
+        entries={domainEntries}
+        isLoading={isLoading}
+        filterControls={{ value: domainFilter, onChange: setDomainFilter }}
+      />
+      <StatisticsTopList
+        title="Top Clients"
+        description="Devices with the most queries"
+        icon={Users}
+        entries={snapshot?.topLists.clients ?? []}
+        isLoading={isLoading}
+      />
+    </TopListsSection>
+  );
+}
