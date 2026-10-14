@@ -1,5 +1,4 @@
 # blockyx: blocky DNS + web UI as a single binary.
-# Minimal scratch image: static Go binary + ca-certificates only.
 # Usage: docker build -t blockyx . && docker run -p 53:53/udp -p 53:53/tcp \
 #   -p 4000:4000 -v ./config.yml:/etc/blockyx/config.yml blockyx
 
@@ -30,23 +29,25 @@ RUN CGO_ENABLED=0 go build -trimpath \
   -o /blockyx . \
   && /blockyx --version
 
-# ---------- runner (scratch, minimal) ----------
-FROM scratch
+# ---------- runner ----------
+FROM alpine:3.24
+WORKDIR /app
 
 LABEL org.opencontainers.image.source="https://github.com/aurorax-neo/blockyx"
 LABEL org.opencontainers.image.description="blockyx: blocky DNS server with embedded web UI, API key auth and query logs"
 
-# ca-certificates for DoH/DoT upstreams
-COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=go-builder /blockyx /blockyx
-COPY config.yml.example /config.yml.example
+RUN apk add --no-cache ca-certificates su-exec \
+  && addgroup --system --gid 1001 blockyx \
+  && adduser --system --uid 1001 --ingroup blockyx blockyx \
+  && mkdir -p /etc/blockyx /logs /data
 
-# Run as non-root (nobody:65534)
-USER 65534:65534
+COPY --from=go-builder /blockyx ./blockyx
+COPY config.yml.example ./config.yml.example
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x entrypoint.sh
 
 EXPOSE 53/udp 53/tcp 4000
 
 ENV BLOCKYX_CONFIG=/etc/blockyx/config.yml
 
-ENTRYPOINT ["/blockyx"]
-CMD ["--config", "/etc/blockyx/config.yml"]
+ENTRYPOINT ["./entrypoint.sh"]
