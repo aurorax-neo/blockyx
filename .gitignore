@@ -4,12 +4,12 @@
 /*.pem
 bin/
 dist/
-docs/docs.go
-docs/superpowers/
+backend/docs/docs.go
+backend/docs/superpowers/
 site/
 config.yml
 todo.txt
-!docs/config.yml
+!backend/docs/config.yml
 node_modules
 package-lock.json
 vendor/
@@ -17,5 +17,5 @@ coverage.html
 coverage.txt
 coverage/
 blocky
-web/ui-out/*
-!web/ui-out/.gitkeep
+backend/web/ui-out/*
+!backend/web/ui-out/.gitkeep

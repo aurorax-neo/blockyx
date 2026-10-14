@@ -2,9 +2,9 @@ bin
 dist
 site
 node_modules
-webui/.next
-webui/out
-web/ui-out
+frontend/.next
+frontend/out
+backend/web/ui-out
 .git
 .idea
 .github
@@ -13,7 +13,7 @@ web/ui-out
 *.md
 LICENSE
 vendor
-e2e/
+backend/e2e/
 .devcontainer/
 coverage.txt
 coverage/

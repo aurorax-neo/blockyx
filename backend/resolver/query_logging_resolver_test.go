@@ -431,7 +431,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 		When("fallback logger is enabled, log retention is enabled", func() {
 			BeforeEach(func() {
 				sutConfig = config.QueryLog{
-					LogRetentionDays: 7,
+					Retention: config.Duration(7 * 24 * time.Hour),
 					Type:             config.QueryLogTypeConsole,
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
@@ -446,7 +446,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				sutConfig = config.QueryLog{
 					Target:           config.Secret(tmpDir.Path),
 					Type:             config.QueryLogTypeCsv,
-					LogRetentionDays: 7,
+					Retention: config.Duration(7 * 24 * time.Hour),
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
@@ -547,7 +547,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 			writer, err := GetQueryLoggingWriter(ctx, config.QueryLog{
 				Type:     config.QueryLogTypeCsv,
 				Target:   config.Secret(tmpDir),
-				Rotation: config.QueryLogRotationHourly,
+				Rotation: config.Duration(time.Hour),
 			}, "test-instance")
 
 			Expect(err).Should(Succeed())
@@ -561,7 +561,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 			_, err := GetQueryLoggingWriter(ctx, config.QueryLog{
 				Type:     config.QueryLogTypeCsv,
 				Target:   config.Secret(tmpDir),
-				Rotation: config.QueryLogRotation("fortnightly"),
+				Rotation: config.Duration(-1 * time.Hour),
 			}, "test-instance")
 
 			Expect(err).Should(HaveOccurred())

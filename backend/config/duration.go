@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/0xERR0R/blocky/log"
@@ -53,6 +54,15 @@ func (c *Duration) UnmarshalText(data []byte) error {
 		log.Log().Warnf("Setting a duration without a unit is deprecated. Please use '%s min' instead.", input)
 
 		return nil
+	}
+
+	// Support days suffix (e.g. "7d"), which time.ParseDuration lacks
+	if strings.HasSuffix(input, "d") {
+		if days, err := strconv.Atoi(strings.TrimSuffix(input, "d")); err == nil {
+			*c = Duration(time.Duration(days) * 24 * time.Hour)
+
+			return nil
+		}
 	}
 
 	duration, err := time.ParseDuration(input)

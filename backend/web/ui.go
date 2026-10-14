@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-// Embedded single-page UI built from webui/ with `output: "export"`.
+// Embedded single-page UI built from frontend/ with `output: "export"`.
 // The directory is populated at build time (see Dockerfile); a local
 // `go build` without it serves an empty UI.
 //

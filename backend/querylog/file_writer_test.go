@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/helpertest"
 	"github.com/0xERR0R/blocky/log"
 
@@ -31,13 +30,13 @@ var _ = Describe("FileWriter", func() {
 	Describe("CSV writer", func() {
 		When("target dir does not exist", func() {
 			It("should return error", func() {
-				_, err = NewCSVWriter("wrongdir", false, 0, config.QueryLogRotationDaily)
+				_, err = NewCSVWriter("wrongdir", false, 0, 24*time.Hour)
 				Expect(err).Should(HaveOccurred())
 			})
 		})
 		When("New log entry was created", func() {
 			It("should be logged in one file", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationDaily)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 24*time.Hour)
 
 				Expect(err).Should(Succeed())
 
@@ -64,7 +63,7 @@ var _ = Describe("FileWriter", func() {
 			})
 
 			It("should be logged in separate files per client", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, true, 0, config.QueryLogRotationDaily)
+				writer, err = NewCSVWriter(tmpDir.Path, true, 0, 24*time.Hour)
 
 				Expect(err).Should(Succeed())
 
@@ -97,7 +96,7 @@ var _ = Describe("FileWriter", func() {
 		})
 		When("rotation is hourly", func() {
 			It("should write one file per hour", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationHourly)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, time.Hour)
 
 				Expect(err).Should(Succeed())
 
@@ -125,7 +124,7 @@ var _ = Describe("FileWriter", func() {
 		})
 		When("rotation is minutely", func() {
 			It("should write one file per minute", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationMinutely)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, time.Minute)
 
 				Expect(err).Should(Succeed())
 
@@ -144,7 +143,7 @@ var _ = Describe("FileWriter", func() {
 		})
 		When("rotation is empty", func() {
 			It("should default to daily", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, "")
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 0)
 
 				Expect(err).Should(Succeed())
 
@@ -162,7 +161,7 @@ var _ = Describe("FileWriter", func() {
 		})
 		When("Cleanup is called", func() {
 			It("should delete old files", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 1, config.QueryLogRotationDaily)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 24*time.Hour, 24*time.Hour)
 
 				Expect(err).Should(Succeed())
 

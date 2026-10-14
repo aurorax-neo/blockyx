@@ -20,7 +20,7 @@ var _ = Describe("QueryLogConfig", func() {
 		cfg = QueryLog{
 			Target:           "/dev/null",
 			Type:             QueryLogTypeCsvClient,
-			LogRetentionDays: 0,
+			Retention: 0,
 			CreationAttempts: 1,
 			CreationCooldown: Duration(time.Millisecond),
 		}
@@ -56,7 +56,7 @@ var _ = Describe("QueryLogConfig", func() {
 			cfg.LogConfig(logger)
 
 			Expect(hook.Calls).ShouldNot(BeEmpty())
-			Expect(hook.Messages).Should(ContainElement(ContainSubstring("logRetentionDays:")))
+			Expect(hook.Messages).Should(ContainElement(ContainSubstring("retention:")))
 			Expect(hook.Messages).Should(ContainElement(ContainSubstring("sudn:")))
 		})
 

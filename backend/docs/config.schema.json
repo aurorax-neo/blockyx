@@ -704,9 +704,20 @@
           ],
           "description": "Log target type: mysql, postgresql, timescale, sqlite, csv, csv-client, console, dnstap, or none.\n\n- `console`: Log to console output (used when no type is set).\n- `none`: Do not log any queries.\n- `mysql`: Log each query to an external MySQL or MariaDB database.\n- `postgresql`: Log each query to an external PostgreSQL database.\n- `csv`: Log to a CSV file (one per day).\n- `csv-client`: Log to a CSV file (one per day and per client).\n- `timescale`: Log each query to an external Timescale database.\n- `sqlite`: Log each query to a local SQLite database file.\n- `dnstap`: Export query/response events via dnstap (Frame Streams)."
         },
-        "logRetentionDays": {
-          "type": "integer",
-          "description": "Delete log entries older than this many days. 0 disables retention cleanup."
+        "retention": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Delete log files older than this duration. 0 disables retention cleanup.\nExample: 7d, 30d, 168h.",
+          "examples": [
+            "30s",
+            "1h"
+          ]
         },
         "creationAttempts": {
           "type": "integer",
@@ -761,8 +772,19 @@
           ]
         },
         "rotation": {
-          "type": "string",
-          "description": "Time granularity of CSV query log files: daily, hourly, or minutely\n(blockyx extension). Only applies to the csv and csv-client types."
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Time granularity of CSV query log files as a duration (blockyx extension).\nExample: 24h (one file per day: 2006-01-02_ALL.log),\n1h (one file per hour: 2006-01-02_15_ALL.log),\n1m (one file per minute: 2006-01-02_15-04_ALL.log).\nOnly applies to the csv and csv-client types.",
+          "examples": [
+            "30s",
+            "1h"
+          ]
         },
         "ignore": {
           "properties": {
@@ -858,7 +880,7 @@
       "properties": {
         "apiKey": {
           "type": "string",
-          "description": "APIKey, when set, requires API key authentication for all /api/* endpoints.\nClients must send the key either as X-API-Key header or as\nAuthorization: Bearer \u003ckey\u003e header. Empty (default) disables authentication.\nIt can also be provided via the BLOCKYX_API_KEY environment variable,\nwhich takes precedence over the config file value."
+          "description": "APIKey, when set, requires API key authentication for all /api/* endpoints.\nClients must send the key either as X-API-Key header or as\nAuthorization: Bearer \u003ckey\u003e header.\nIt can also be provided via the BLOCKYX_API_KEY environment variable,\nwhich takes precedence over the config file value.\nThe blockyx binary refuses to start when no key is configured."
         }
       },
       "additionalProperties": false,

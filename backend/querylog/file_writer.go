@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/log"
 	"github.com/0xERR0R/blocky/util"
 	"github.com/sirupsen/logrus"
@@ -25,31 +24,31 @@ const (
 var validFilePattern = regexp.MustCompile("[^a-zA-Z0-9-_]+")
 
 type FileWriter struct {
-	target           string
-	perClient        bool
-	logRetentionDays uint64
-	rotation         config.QueryLogRotation
+	target    string
+	perClient bool
+	retention time.Duration
+	rotation  time.Duration
 }
 
 func NewCSVWriter(
 	target string,
 	perClient bool,
-	logRetentionDays uint64,
-	rotation config.QueryLogRotation,
+	retention time.Duration,
+	rotation time.Duration,
 ) (*FileWriter, error) {
 	if _, err := os.Stat(target); target != "" && err != nil && os.IsNotExist(err) {
 		return nil, fmt.Errorf("query log directory '%s' does not exist or is not writable", target)
 	}
 
-	if rotation == "" {
-		rotation = config.QueryLogRotationDaily
+	if rotation == 0 {
+		rotation = 24 * time.Hour
 	}
 
 	return &FileWriter{
-		target:           target,
-		perClient:        perClient,
-		logRetentionDays: logRetentionDays,
-		rotation:         rotation,
+		target:    target,
+		perClient: perClient,
+		retention: retention,
+		rotation:  rotation,
 	}, nil
 }
 
@@ -59,13 +58,13 @@ func NewCSVWriter(
 func (d *FileWriter) fileName(entry *LogEntry) string {
 	var datePart string
 
-	switch d.rotation {
-	case config.QueryLogRotationHourly:
-		datePart = entry.Start.Format("2006-01-02_15")
-	case config.QueryLogRotationMinutely:
-		datePart = entry.Start.Format("2006-01-02_15-04")
-	default:
+	switch {
+	case d.rotation >= 24*time.Hour:
 		datePart = entry.Start.Format("2006-01-02")
+	case d.rotation >= time.Hour:
+		datePart = entry.Start.Format("2006-01-02_15")
+	default:
+		datePart = entry.Start.Format("2006-01-02_15-04")
 	}
 
 	var clientPrefix string
@@ -100,8 +99,6 @@ func (d *FileWriter) Write(entry *LogEntry) {
 
 // CleanUp deletes old log files
 func (d *FileWriter) CleanUp() {
-	const hoursPerDay = 24
-
 	logger := log.PrefixedLog(loggerPrefixFileWriter)
 
 	logger.Trace("starting clean up")
@@ -115,12 +112,12 @@ func (d *FileWriter) CleanUp() {
 		if strings.HasSuffix(f.Name(), ".log") && len(f.Name()) > 10 {
 			t, err := time.ParseInLocation("2006-01-02", f.Name()[:10], time.Local)
 			if err == nil {
-				differenceDays := uint64(time.Since(t).Hours() / hoursPerDay)
-				if d.logRetentionDays > 0 && differenceDays > d.logRetentionDays {
+				age := time.Since(t)
+				if d.retention > 0 && age > d.retention {
 					logger.WithFields(logrus.Fields{
-						"file":             f.Name(),
-						"ageInDays":        differenceDays,
-						"logRetentionDays": d.logRetentionDays,
+						"file":      f.Name(),
+						"age":       age.String(),
+						"retention": d.retention.String(),
 					}).Info("existing log file is older than retention time and will be deleted")
 
 					err := os.Remove(filepath.Join(d.target, f.Name()))

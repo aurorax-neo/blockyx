@@ -53,7 +53,7 @@ var _ = Describe("DatabaseWriter", func() {
 
 		When("New log entry was created", func() {
 			BeforeEach(func() {
-				writer, err = newDatabaseWriter(ctx, sqliteDB, 7, time.Millisecond, config.QueryLogTypeSqlite)
+				writer, err = newDatabaseWriter(ctx, sqliteDB, 7*24*time.Hour, time.Millisecond, config.QueryLogTypeSqlite)
 				Expect(err).Should(Succeed())
 
 				db, err := writer.db.DB()
@@ -91,7 +91,7 @@ var _ = Describe("DatabaseWriter", func() {
 
 		When("> 10000 Entries were created", func() {
 			BeforeEach(func() {
-				writer, err = newDatabaseWriter(ctx, sqliteDB, 7, time.Millisecond, config.QueryLogTypeSqlite)
+				writer, err = newDatabaseWriter(ctx, sqliteDB, 7*24*time.Hour, time.Millisecond, config.QueryLogTypeSqlite)
 				Expect(err).Should(Succeed())
 			})
 
@@ -115,7 +115,7 @@ var _ = Describe("DatabaseWriter", func() {
 
 		When("There are log entries with timestamp exceeding the retention period", func() {
 			BeforeEach(func() {
-				writer, err = newDatabaseWriter(ctx, sqliteDB, 1, time.Millisecond, config.QueryLogTypeSqlite)
+				writer, err = newDatabaseWriter(ctx, sqliteDB, 24*time.Hour, time.Millisecond, config.QueryLogTypeSqlite)
 				Expect(err).Should(Succeed())
 			})
 
@@ -277,7 +277,7 @@ var _ = Describe("DatabaseWriter", func() {
 					mock.ExpectExec(`ALTER TABLE log_entries ADD column if not exists id bigserial primary key`).WillReturnResult(sqlmock.NewResult(0, 0))
 				})
 
-				_, err = newDatabaseWriter(ctx, dlc, 1, time.Millisecond, config.QueryLogTypePostgresql)
+				_, err = newDatabaseWriter(ctx, dlc, 24*time.Hour, time.Millisecond, config.QueryLogTypePostgresql)
 				Expect(err).Should(Succeed())
 			})
 		})
@@ -308,7 +308,7 @@ var _ = Describe("DatabaseWriter", func() {
 						mock.ExpectExec("ALTER TABLE `log_entries` ADD `id` INT PRIMARY KEY AUTO_INCREMENT").WillReturnResult(sqlmock.NewResult(0, 0))
 					})
 
-					_, err = newDatabaseWriter(ctx, dlc, 1, time.Millisecond, config.QueryLogTypeMysql)
+					_, err = newDatabaseWriter(ctx, dlc, 24*time.Hour, time.Millisecond, config.QueryLogTypeMysql)
 					Expect(err).Should(Succeed())
 				})
 			})
@@ -323,7 +323,7 @@ var _ = Describe("DatabaseWriter", func() {
 						mock.ExpectExec("ALTER TABLE `log_entries` ADD `id` INT PRIMARY KEY AUTO_INCREMENT").WillReturnError(errors.New("error 1060: duplicate column name"))
 					})
 
-					_, err = newDatabaseWriter(ctx, dlc, 1, time.Millisecond, config.QueryLogTypeMysql)
+					_, err = newDatabaseWriter(ctx, dlc, 24*time.Hour, time.Millisecond, config.QueryLogTypeMysql)
 					Expect(err).Should(Succeed())
 				})
 
@@ -336,7 +336,7 @@ var _ = Describe("DatabaseWriter", func() {
 						mock.ExpectExec("ALTER TABLE `log_entries` ADD `id` INT PRIMARY KEY AUTO_INCREMENT").WillReturnError(errors.New("error XXX: some index error"))
 					})
 
-					_, err = newDatabaseWriter(ctx, dlc, 1, time.Millisecond, config.QueryLogTypeMysql)
+					_, err = newDatabaseWriter(ctx, dlc, 24*time.Hour, time.Millisecond, config.QueryLogTypeMysql)
 					Expect(err).Should(HaveOccurred())
 					Expect(err.Error()).Should(ContainSubstring("error XXX: some index error"))
 				})
@@ -348,7 +348,7 @@ var _ = Describe("DatabaseWriter", func() {
 						mock.ExpectExec("CREATE TABLE `log_entries`").WillReturnError(errors.New("error XXX: some db error"))
 					})
 
-					_, err = newDatabaseWriter(ctx, dlc, 1, time.Millisecond, config.QueryLogTypeMysql)
+					_, err = newDatabaseWriter(ctx, dlc, 24*time.Hour, time.Millisecond, config.QueryLogTypeMysql)
 					Expect(err).Should(HaveOccurred())
 					Expect(err.Error()).Should(ContainSubstring("error XXX: some db error"))
 				})

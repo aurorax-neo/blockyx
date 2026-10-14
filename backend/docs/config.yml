@@ -252,8 +252,8 @@ queryLog:
   target: db_user:db_password@tcp(db_host_or_ip:3306)/db_name?charset=utf8mb4&parseTime=True&loc=Local
   #postgresql target: postgres://user:password@db_host_or_ip:5432/db_name
   #sqlite target: /var/lib/blocky/querylog.db   # WAL mode is enabled automatically
-  # if > 0, deletes log files which are older than ... days
-  logRetentionDays: 7
+  # if > 0, deletes log files which are older than the given duration (e.g. 7d, 30d)
+  retention: 7d
   # optional: Max attempts to create specific query log writer, default: 3
   creationAttempts: 1
   # optional: Time between the creation attempts, default: 2s

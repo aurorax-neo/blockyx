@@ -40,33 +40,33 @@ type logEntry struct {
 
 type DatabaseWriter struct {
 	db               *gorm.DB
-	logRetentionDays uint64
+	retention time.Duration
 	pendingEntries   []*logEntry
 	lock             sync.RWMutex
 	dbFlushPeriod    time.Duration
 }
 
-func NewDatabaseWriter(ctx context.Context, dbType config.QueryLogType, target string, logRetentionDays uint64,
+func NewDatabaseWriter(ctx context.Context, dbType config.QueryLogType, target string, retention time.Duration,
 	dbFlushPeriod time.Duration,
 ) (*DatabaseWriter, error) {
 	switch dbType { //nolint:exhaustive // non-database query-log types are handled in GetQueryLoggingWriter
 	case config.QueryLogTypeMysql:
-		return newDatabaseWriter(ctx, mysql.Open(target), logRetentionDays, dbFlushPeriod, dbType)
+		return newDatabaseWriter(ctx, mysql.Open(target), retention, dbFlushPeriod, dbType)
 	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
-		return newDatabaseWriter(ctx, postgres.Open(target), logRetentionDays, dbFlushPeriod, dbType)
+		return newDatabaseWriter(ctx, postgres.Open(target), retention, dbFlushPeriod, dbType)
 	case config.QueryLogTypeSqlite:
 		dialector, err := newSQLiteDialector(target)
 		if err != nil {
 			return nil, err
 		}
 
-		return newDatabaseWriter(ctx, dialector, logRetentionDays, dbFlushPeriod, dbType)
+		return newDatabaseWriter(ctx, dialector, retention, dbFlushPeriod, dbType)
 	}
 
 	return nil, fmt.Errorf("incorrect database type provided: %s", dbType)
 }
 
-func newDatabaseWriter(ctx context.Context, target gorm.Dialector, logRetentionDays uint64,
+func newDatabaseWriter(ctx context.Context, target gorm.Dialector, retention time.Duration,
 	dbFlushPeriod time.Duration, dbType config.QueryLogType,
 ) (*DatabaseWriter, error) {
 	db, err := gorm.Open(target, &gorm.Config{
@@ -98,13 +98,13 @@ func newDatabaseWriter(ctx context.Context, target gorm.Dialector, logRetentionD
 	}
 
 	// Migrate the schema
-	if err := databaseMigration(db, dbType, logRetentionDays); err != nil {
+	if err := databaseMigration(db, dbType, retention); err != nil {
 		return nil, fmt.Errorf("can't perform auto migration: %w", err)
 	}
 
 	w := &DatabaseWriter{
 		db:               db,
-		logRetentionDays: logRetentionDays,
+		retention: retention,
 		dbFlushPeriod:    dbFlushPeriod,
 	}
 
@@ -113,7 +113,7 @@ func newDatabaseWriter(ctx context.Context, target gorm.Dialector, logRetentionD
 	return w, nil
 }
 
-func databaseMigration(db *gorm.DB, dbType config.QueryLogType, logRetentionDays uint64) error {
+func databaseMigration(db *gorm.DB, dbType config.QueryLogType, retention time.Duration) error {
 	if err := db.AutoMigrate(&logEntry{}); err != nil {
 		return fmt.Errorf("failed to auto-migrate database schema for querylog: %w", err)
 	}
@@ -159,7 +159,7 @@ func databaseMigration(db *gorm.DB, dbType config.QueryLogType, logRetentionDays
 		// Create a retention policy for the hypertable
 		tx = db.Exec(`SELECT add_retention_policy(
 			'` + tableName + `',
-			drop_after => INTERVAL '` + strconv.FormatUint(logRetentionDays, 10) + ` days',
+			drop_after => INTERVAL '` + strconv.Itoa(int(retention.Hours()/24)) + ` days',
 			if_not_exists => TRUE
 		)`)
 		if tx.Error != nil {
@@ -213,7 +213,7 @@ func (d *DatabaseWriter) Write(entry *LogEntry) {
 }
 
 func (d *DatabaseWriter) CleanUp() {
-	deletionDate := time.Now().AddDate(0, 0, int(-d.logRetentionDays)) //nolint:gosec // G115: correct via two's complement
+	deletionDate := time.Now().Add(-d.retention)
 
 	log.PrefixedLog("database_writer").Debugf("deleting log entries with request_ts < %s", deletionDate)
 	d.db.Where("request_ts < ?", deletionDate).Delete(&logEntry{})

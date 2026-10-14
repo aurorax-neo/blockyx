@@ -45,16 +45,15 @@ type QueryLoggingResolver struct {
 	ignoreDomains stringcache.GroupedStringCache
 }
 
-func validateRotation(rotation config.QueryLogRotation) error {
-	switch rotation {
-	case "", config.QueryLogRotationDaily, config.QueryLogRotationHourly, config.QueryLogRotationMinutely:
-		return nil
-	default:
+func validateRotation(rotation config.Duration) error {
+	if rotation.ToDuration() <= 0 {
 		return fmt.Errorf(
-			"invalid query log rotation '%s': must be one of daily, hourly, minutely",
+			"invalid query log rotation '%s': must be a positive duration (e.g. 24h, 1h, 1m)",
 			rotation,
 		)
 	}
+
+	return nil
 }
 
 func GetQueryLoggingWriter(ctx context.Context, cfg config.QueryLog, instanceID string) (querylog.Writer, error) {
@@ -69,11 +68,11 @@ func GetQueryLoggingWriter(ctx context.Context, cfg config.QueryLog, instanceID 
 		}
 
 		perClient := cfg.Type == config.QueryLogTypeCsvClient
-		writer, err = querylog.NewCSVWriter(cfg.Target.Reveal(), perClient, cfg.LogRetentionDays, cfg.Rotation)
+		writer, err = querylog.NewCSVWriter(cfg.Target.Reveal(), perClient, cfg.Retention.ToDuration(), cfg.Rotation.ToDuration())
 	case config.QueryLogTypeMysql, config.QueryLogTypePostgresql, config.QueryLogTypeTimescale, config.QueryLogTypeSqlite:
 		// The database-backed targets share one writer; it selects the driver and
 		// migration from the typed QueryLogType, so no per-type string is threaded through.
-		writer, err = querylog.NewDatabaseWriter(ctx, cfg.Type, cfg.Target.Reveal(), cfg.LogRetentionDays,
+		writer, err = querylog.NewDatabaseWriter(ctx, cfg.Type, cfg.Target.Reveal(), cfg.Retention.ToDuration(),
 			cfg.FlushInterval.ToDuration())
 	case config.QueryLogTypeConsole:
 		writer = querylog.NewLoggerWriter()
@@ -186,7 +185,7 @@ func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) (*QueryLo
 	go resolver.writeLog(ctx)
 
 	// Timescale uses database features for retention
-	if cfg.LogRetentionDays > 0 &&
+	if cfg.Retention.IsAboveZero() &&
 		cfg.Type != config.QueryLogTypeTimescale &&
 		cfg.Type != config.QueryLogTypeDnstap {
 		go resolver.periodicCleanUp(ctx)

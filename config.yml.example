@@ -19,14 +19,14 @@ statistics:
     flushInterval: 5m
 
 # Query log with configurable file granularity (blockyx extension):
-# daily    -> 2006-01-02_ALL.log
-# hourly   -> 2006-01-02_15_ALL.log
-# minutely -> 2006-01-02_15-04_ALL.log
+# 24h -> 2006-01-02_ALL.log (one file per day)
+# 1h  -> 2006-01-02_15_ALL.log (one file per hour)
+# 1m  -> 2006-01-02_15-04_ALL.log (one file per minute)
 queryLog:
   type: csv
   target: /logs
-  rotation: daily
-  logRetentionDays: 7
+  rotation: 24h
+  retention: 7d
 
 # API key authentication (blockyx extension). REQUIRED: the binary refuses
 # to start when no key is configured (set here or via BLOCKYX_API_KEY).

@@ -5,27 +5,27 @@
 #   -p 4000:4000 -v ./config.yml:/etc/blockyx/config.yml blockyx
 
 # ---------- web UI builder (static export) ----------
-FROM node:24-alpine AS webui-builder
-WORKDIR /build/webui
+FROM node:24-alpine AS frontend-builder
+WORKDIR /build/frontend
 ARG BUN_VERSION=1.4.2
 RUN apk add --no-cache g++ make python3 \
   && npm install --global bun@${BUN_VERSION}
-COPY webui/package.json webui/bun.lock ./
+COPY frontend/package.json frontend/bun.lock ./
 RUN bun install --frozen-lockfile
-COPY webui/ ./
+COPY frontend/ ./
 RUN bun run build
 
 # ---------- Go builder ----------
 FROM golang:1.26.2-alpine AS go-builder
-WORKDIR /build
+WORKDIR /build/backend
 ARG VERSION=dev
 ARG TARGETARCH
 RUN apk add --no-cache git
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-COPY . ./
+COPY backend/ ./
 # Embed the statically exported UI into the binary.
-COPY --from=webui-builder /build/webui/out ./web/ui-out
+COPY --from=frontend-builder /build/frontend/out ./web/ui-out
 RUN CGO_ENABLED=0 go build -trimpath \
   -ldflags="-s -w -X github.com/0xERR0R/blocky/util.Version=${VERSION} -X github.com/0xERR0R/blocky/util.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/0xERR0R/blocky/util.Architecture=${TARGETARCH}" \
   -o /blockyx .

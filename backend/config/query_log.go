@@ -3,22 +3,10 @@ package config
 import (
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/0xERR0R/blocky/log"
 	"github.com/sirupsen/logrus"
-)
-
-// QueryLogRotation controls the time granularity of CSV query log files
-// (blockyx extension).
-type QueryLogRotation string
-
-const (
-	// QueryLogRotationDaily writes one log file per day: 2006-01-02_ALL.log.
-	QueryLogRotationDaily QueryLogRotation = "daily"
-	// QueryLogRotationHourly writes one log file per hour: 2006-01-02_15_ALL.log.
-	QueryLogRotationHourly QueryLogRotation = "hourly"
-	// QueryLogRotationMinutely writes one log file per minute: 2006-01-02_15-04_ALL.log.
-	QueryLogRotationMinutely QueryLogRotation = "minutely"
 )
 
 // QueryLog configuration for the query logging
@@ -28,8 +16,9 @@ type QueryLog struct {
 	Target Secret `yaml:"target"`
 	// Log target type: mysql, postgresql, timescale, sqlite, csv, csv-client, console, dnstap, or none.
 	Type QueryLogType `yaml:"type"`
-	// Delete log entries older than this many days. 0 disables retention cleanup.
-	LogRetentionDays uint64 `yaml:"logRetentionDays"`
+	// Delete log files older than this duration. 0 disables retention cleanup.
+	// Example: 7d, 30d, 168h.
+	Retention Duration `yaml:"retention"`
 	// Maximum number of attempts to create the query log writer on startup.
 	CreationAttempts int `default:"3" yaml:"creationAttempts"`
 	// Delay between query log writer creation attempts.
@@ -39,9 +28,12 @@ type QueryLog struct {
 	// Interval at which buffered log entries are flushed in bulk to the database or dnstap socket
 	// (used by the mysql, postgresql, timescale, sqlite and dnstap targets).
 	FlushInterval Duration `default:"30s" yaml:"flushInterval"`
-	// Time granularity of CSV query log files: daily, hourly, or minutely
-	// (blockyx extension). Only applies to the csv and csv-client types.
-	Rotation QueryLogRotation `yaml:"rotation"`
+	// Time granularity of CSV query log files as a duration (blockyx extension).
+	// Example: 24h (one file per day: 2006-01-02_ALL.log),
+	// 1h (one file per hour: 2006-01-02_15_ALL.log),
+	// 1m (one file per minute: 2006-01-02_15-04_ALL.log).
+	// Only applies to the csv and csv-client types.
+	Rotation Duration `yaml:"rotation"`
 	// Rules to suppress certain queries from being logged.
 	Ignore QueryLogIgnore `yaml:"ignore"`
 }
@@ -60,8 +52,8 @@ func (c *QueryLog) SetDefaults() {
 	// to avoid having to repeat the values in the annotation.
 	c.Fields = QueryLogFieldValues()
 
-	if c.Rotation == "" {
-		c.Rotation = QueryLogRotationDaily
+	if c.Rotation == 0 {
+		c.Rotation = Duration(24 * time.Hour)
 	}
 }
 
@@ -78,7 +70,7 @@ func (c *QueryLog) LogConfig(logger *logrus.Entry) {
 		logger.Infof("target: %s", c.censoredTarget())
 	}
 
-	logger.Infof("logRetentionDays: %d", c.LogRetentionDays)
+	logger.Infof("retention: %s", c.Retention)
 	logger.Debugf("creationAttempts: %d", c.CreationAttempts)
 	logger.Debugf("creationCooldown: %s", c.CreationCooldown)
 	logger.Infof("flushInterval: %s", c.FlushInterval)
