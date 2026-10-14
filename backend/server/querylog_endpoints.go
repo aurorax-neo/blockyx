@@ -35,13 +35,17 @@ type queryLogSource interface {
 
 // queryLogHandler serves the query log endpoints.
 type queryLogHandler struct {
-	source queryLogSource
+	source  queryLogSource
+	logType config.QueryLogType
 }
 
 func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
 	switch cfg.QueryLog.Type {
 	case config.QueryLogTypeCsv, config.QueryLogTypeCsvClient:
-		return &queryLogHandler{source: &csvSource{dir: cfg.QueryLog.Target.Reveal()}}, nil
+		return &queryLogHandler{
+			source:  &csvSource{dir: cfg.QueryLog.Target.Reveal()},
+			logType: cfg.QueryLog.Type,
+		}, nil
 	case config.QueryLogTypeSqlite, config.QueryLogTypeMysql,
 		config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
 		db, err := querylog.NewDBReader(context.Background(), cfg.QueryLog.Type, cfg.QueryLog.Target.Reveal())
@@ -49,7 +53,10 @@ func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
 			return nil, err
 		}
 
-		return &queryLogHandler{source: &dbSource{reader: db}}, nil
+		return &queryLogHandler{
+			source:  &dbSource{reader: db},
+			logType: cfg.QueryLog.Type,
+		}, nil
 	default:
 		return nil, errQueryLogUnsupported
 	}
@@ -58,8 +65,16 @@ func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
 func configureQueryLogHandler(router *chi.Mux, cfg *config.Config) {
 	h, err := newQueryLogHandler(cfg)
 	if err != nil {
+		// Unsupported type (console/dnstap/none): expose a status endpoint
+		// so the UI knows not to query, plus 503 for everything else.
 		router.Route("/api/querylog", func(r chi.Router) {
 			r.Use(api.APIKeyAuthMiddleware(cfg.API.APIKey.Reveal()))
+			r.Get("/status", func(w http.ResponseWriter, _ *http.Request) {
+				writeQueryLogJSON(w, http.StatusOK, map[string]any{
+					"type":      cfg.QueryLog.Type.String(),
+					"supported": false,
+				})
+			})
 			r.Get("/*", func(w http.ResponseWriter, _ *http.Request) {
 				writeQueryLogError(w, http.StatusServiceUnavailable, err.Error())
 			})
@@ -70,6 +85,7 @@ func configureQueryLogHandler(router *chi.Mux, cfg *config.Config) {
 
 	router.Route("/api/querylog", func(r chi.Router) {
 		r.Use(api.APIKeyAuthMiddleware(cfg.API.APIKey.Reveal()))
+		r.Get("/status", h.status)
 		r.Get("/rows", h.rows)
 		r.Get("/count", h.count)
 		r.Get("/over-time", h.overTime)
@@ -503,6 +519,15 @@ func queryInt(r *http.Request, name string, def int) int {
 	}
 
 	return def
+}
+
+// GET /api/querylog/status — returns the configured log type and whether
+// the UI query endpoints are supported.
+func (h *queryLogHandler) status(w http.ResponseWriter, _ *http.Request) {
+	writeQueryLogJSON(w, http.StatusOK, map[string]any{
+		"type":      h.logType.String(),
+		"supported": true,
+	})
 }
 
 // GET /api/querylog/rows — paginated log rows, newest first.

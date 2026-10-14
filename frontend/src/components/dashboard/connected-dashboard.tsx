@@ -81,9 +81,11 @@ export function ConnectedDashboard({ apiKey }: { apiKey: string }) {
     queryKey: ["logsAvailable"],
     queryFn: async () => {
       try {
-        await client.get("querylog/count").json();
+        const status = await client
+          .get("querylog/status")
+          .json<{ supported: boolean }>();
 
-        return true;
+        return status.supported;
       } catch {
         return false;
       }

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/signal"
@@ -51,8 +53,17 @@ const privilegedPortCapHint = "grant CAP_NET_BIND_SERVICE (Kubernetes " +
 // available, and warns when a privileged port (< 1024) is configured but the
 // capability could not be obtained. It never fails: any real bind error
 // surfaces later from server.NewServer.
-func warnMissingPrivilegedPortCapability(ports config.Ports) {
-	effective, err := raiseNetBindService()
+// generateAPIKey creates a random 32-byte API key, base64-encoded.
+func generateAPIKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func warnMissingPrivilegedPortCapability(ports config.Ports) {	effective, err := raiseNetBindService()
 	if err != nil {
 		if privileged := ports.PrivilegedPorts(); len(privileged) > 0 {
 			log.Log().Warnf("could not adjust process capabilities (%v); binding "+
@@ -91,10 +102,17 @@ func startServer(_ *cobra.Command, _ []string) error {
 	}
 
 	// Security requirement: the server must never run without an API key.
-	// (The docker entrypoint always provides one, generating a random key
-	// when BLOCKYX_API_KEY is not set.)
+	// Generate a random one when none is configured (printed to stderr).
 	if cfg.API.APIKey.Reveal() == "" {
-		return fmt.Errorf("refusing to start without an API key: set api.apiKey in the config file or the BLOCKYX_API_KEY environment variable")
+		key, err := generateAPIKey()
+		if err != nil {
+			return fmt.Errorf("failed to generate API key: %w", err)
+		}
+
+		cfg.API.APIKey = config.Secret(key)
+
+		fmt.Fprintf(os.Stderr, "blockyx: no API key configured, generated one: %s\n", key)
+		fmt.Fprintf(os.Stderr, "blockyx: set api.apiKey in config or BLOCKYX_API_KEY env var to use your own\n")
 	}
 
 	log.Configure(&cfg.Log)

@@ -49,6 +49,16 @@ func (c *QueryLog) SetDefaults() {
 	// to avoid having to repeat the values in the annotation.
 	c.Fields = QueryLogFieldValues()
 
+	// Default to sqlite (blockyx): the zero value is console (used when no
+	// type is set), which we override. Explicit `type: none` still disables.
+	if c.Type == QueryLogTypeConsole {
+		c.Type = QueryLogTypeSqlite
+	}
+
+	if c.Type == QueryLogTypeSqlite && c.Target == "" {
+		c.Target = Secret("/data/querylog.db")
+	}
+
 	if c.Rotation == 0 {
 		c.Rotation = Size(100 * Megabyte)
 	}

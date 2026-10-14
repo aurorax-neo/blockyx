@@ -131,7 +131,7 @@ var _ = Describe("Serve command", func() {
 	})
 
 	When("Serve command is called without an API key", func() {
-		It("should refuse to start", func() {
+		It("should generate a random key instead of refusing", func() {
 			By("initialize config without apiKey", func() {
 				cfgFile := tmpDir.CreateStringFile("config.yaml",
 					"upstreams:",
@@ -149,10 +149,15 @@ var _ = Describe("Serve command", func() {
 				Expect(initConfig()).Should(Succeed())
 			})
 
-			By("server should terminate with error", func() {
+			By("server should not refuse to start for missing key", func() {
 				err := startServer(newServeCommand(), []string{})
-				Expect(err).Should(MatchError(ContainSubstring("refusing to start without an API key")))
+				// It may fail later (e.g. binding ports in test env),
+				// but must not be the "refusing without key" error.
+				if err != nil {
+					Expect(err.Error()).ShouldNot(ContainSubstring("refusing to start without an API key"))
+				}
 			})
+		})
 		})
 	})
 })
