@@ -90,6 +90,13 @@ func startServer(_ *cobra.Command, _ []string) error {
 		cfg.API.APIKey = config.Secret(apiKey)
 	}
 
+	// Security requirement: the server must never run without an API key.
+	// (The docker entrypoint always provides one, generating a random key
+	// when BLOCKYX_API_KEY is not set.)
+	if cfg.API.APIKey.Reveal() == "" {
+		return fmt.Errorf("refusing to start without an API key: set api.apiKey in the config file or the BLOCKYX_API_KEY environment variable")
+	}
+
 	log.Configure(&cfg.Log)
 
 	warnMissingPrivilegedPortCapability(cfg.Ports)

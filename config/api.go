@@ -8,9 +8,10 @@ import (
 type API struct {
 	// APIKey, when set, requires API key authentication for all /api/* endpoints.
 	// Clients must send the key either as X-API-Key header or as
-	// Authorization: Bearer <key> header. Empty (default) disables authentication.
+	// Authorization: Bearer <key> header.
 	// It can also be provided via the BLOCKYX_API_KEY environment variable,
 	// which takes precedence over the config file value.
+	// The blockyx binary refuses to start when no key is configured.
 	APIKey Secret `yaml:"apiKey"`
 }
 

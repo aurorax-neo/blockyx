@@ -95,6 +95,10 @@ curl -H "Authorization: Bearer your-secret-key" http://<host>:4000/api/blocking/
 
 - 只保护 `/api/*`（含 `/api/stats`、`/api/blocking/*` 等）。
   `/metrics`（prometheus，按配置）和 DNS 端口不受影响。
+- **key 是强制的**：二进制在 `api.apiKey` 和 `BLOCKYX_API_KEY` 都为空时
+  拒绝启动（`Error: refusing to start without an API key`）。docker 部署时
+  entrypoint 会在两者都未设置时生成随机 key 并打印到 `docker logs`，
+  所以容器永远不会无 key 运行。
 - Web UI 容器内部通过 `127.0.0.1:4000` 直连，key 由 entrypoint 自动注入，
   无需手动配置。
 

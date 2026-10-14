@@ -15,7 +15,8 @@ const (
 // APIKeyAuthMiddleware requires API key authentication for every request passing
 // through it. The key can be sent as X-API-Key header or as
 // Authorization: Bearer <key> header. Keys are compared in constant time.
-// An empty apiKey disables the check entirely.
+// An empty apiKey disables the check, but the blockyx binary refuses to start
+// with an empty key (see cmd/serve.go), so this only happens in library/test use.
 func APIKeyAuthMiddleware(apiKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

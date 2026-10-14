@@ -37,7 +37,9 @@ var _ = Describe("Serve command", func() {
 					"    default:",
 					"      - 1.1.1.1",
 					"ports:",
-					"  dns: "+port)
+					"  dns: "+port,
+					"api:",
+					"  apiKey: \"test-key\"")
 
 				os.Setenv(configFileEnvVar, cfgFile.Path)
 				DeferCleanup(func() { os.Unsetenv(configFileEnvVar) })
@@ -84,7 +86,9 @@ var _ = Describe("Serve command", func() {
 					"    default:",
 					"      - 1.1.1.1",
 					"ports:",
-					"  dns: "+port)
+					"  dns: "+port,
+					"api:",
+					"  apiKey: \"test-key\"")
 
 				os.Setenv(configFileEnvVar, cfgFile.Path)
 				DeferCleanup(func() { os.Unsetenv(configFileEnvVar) })
@@ -122,6 +126,32 @@ var _ = Describe("Serve command", func() {
 				var startError error
 				Eventually(errChan).Should(Receive(&startError))
 				Expect(startError).Should(MatchError(ContainSubstring("unable to load configuration")))
+			})
+		})
+	})
+
+	When("Serve command is called without an API key", func() {
+		It("should refuse to start", func() {
+			By("initialize config without apiKey", func() {
+				cfgFile := tmpDir.CreateStringFile("config.yaml",
+					"upstreams:",
+					"  groups:",
+					"    default:",
+					"      - 1.1.1.1",
+					"ports:",
+					"  dns: "+port)
+
+				os.Setenv(configFileEnvVar, cfgFile.Path)
+				DeferCleanup(func() { os.Unsetenv(configFileEnvVar) })
+				// make sure the env override cannot provide the key either
+				os.Unsetenv("BLOCKYX_API_KEY")
+
+				Expect(initConfig()).Should(Succeed())
+			})
+
+			By("server should terminate with error", func() {
+				err := startServer(newServeCommand(), []string{})
+				Expect(err).Should(MatchError(ContainSubstring("refusing to start without an API key")))
 			})
 		})
 	})

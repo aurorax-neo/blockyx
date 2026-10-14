@@ -28,10 +28,12 @@ queryLog:
   rotation: daily
   logRetentionDays: 7
 
-# API key authentication (blockyx extension).
-# When set, every /api/* request must carry the key as X-API-Key header
+# API key authentication (blockyx extension). REQUIRED: the binary refuses
+# to start when no key is configured (set here or via BLOCKYX_API_KEY).
+# Every /api/* request must carry the key as X-API-Key header
 # or as Authorization: Bearer <key> header, otherwise it gets 401.
 # The BLOCKYX_API_KEY environment variable takes precedence over this value.
+# In docker, the entrypoint generates a random key when neither is set.
 api:
   apiKey: ""
 
