@@ -24,6 +24,8 @@ function rangeToMs(range: TimeRange): number {
       return 7 * 86_400_000;
     case "30d":
       return 30 * 86_400_000;
+    default:
+      return 86_400_000;
   }
 }
 
@@ -52,8 +54,7 @@ export function useLogTopList(options: TopListOptions, enabled = true) {
           name: item.name,
           count: item.total,
           blocked: item.blocked,
-          percentage:
-            item.total > 0 ? (item.blocked / item.total) * 100 : 0,
+          percentage: item.total > 0 ? (item.blocked / item.total) * 100 : 0,
         })),
         totalCount: result.totalCount,
       };

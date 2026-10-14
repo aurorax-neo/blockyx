@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { Database, Pause, Power } from "lucide-react";
 import { type ReactNode, useCallback, useEffect } from "react";
 import { ActionLayout } from "~/components/dashboard/action-layout";
@@ -16,7 +17,6 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { useCountdown } from "~/hooks/use-countdown";
 import { useServerCommand } from "~/hooks/use-server-command";
-import { useQueryClient } from "@tanstack/react-query";
 
 const DURATION_PRESETS = [
   { label: "5 minutes", value: "5m", icon: Pause },

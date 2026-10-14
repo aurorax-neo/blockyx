@@ -3,12 +3,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { createApiClient } from "~/lib/blocky-api";
-import {
-  type commandSchema,
-  executeCommand,
-} from "~/lib/blocky-commands";
 import type { z } from "zod";
+import { createApiClient } from "~/lib/blocky-api";
+import { type commandSchema, executeCommand } from "~/lib/blocky-commands";
 
 type Command = z.infer<typeof commandSchema>;
 

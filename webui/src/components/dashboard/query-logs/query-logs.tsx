@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -31,18 +32,17 @@ import {
   TooltipTrigger,
 } from "~/components/ui/tooltip";
 import { usePrefetchAdjacentPages } from "~/hooks/use-prefetch-adjacent-pages";
+import { createApiClient } from "~/lib/blocky-api";
 import {
   BLOCKY_DNS_RECORD_TYPES,
   BLOCKY_RESPONSE_TYPES,
   isDnsRecordType,
   isResponseType,
 } from "~/lib/constants";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createApiClient } from "~/lib/blocky-api";
 import {
+  type QueryLogFilters as ApiFilters,
   fetchLogCount,
   fetchLogRows,
-  type QueryLogFilters as ApiFilters,
 } from "~/lib/querylog-api";
 import { columns } from "./columns";
 import { DataTable } from "./data-table";
@@ -178,7 +178,12 @@ export function QueryLogs({
       queryClient.prefetchQuery({
         queryKey: ["querylog", "rows", apiFilters, pageSize, targetPage],
         queryFn: () =>
-          fetchLogRows(apiClient, apiFilters, pageSize + 1, targetPage * pageSize),
+          fetchLogRows(
+            apiClient,
+            apiFilters,
+            pageSize + 1,
+            targetPage * pageSize,
+          ),
       });
     },
   });

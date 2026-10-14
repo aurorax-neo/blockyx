@@ -5,8 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MobileQueryLog } from "~/components/dashboard/query-logs/mobile-query-log";
-import { getMockLogEntries } from "~/mocks/log-entry-mock";
 import type { LogEntry } from "~/lib/querylog-types";
+import { getMockLogEntries } from "~/mocks/log-entry-mock";
 
 function renderLog(overrides: Partial<LogEntry>, showServer = false) {
   const [sample] = getMockLogEntries();

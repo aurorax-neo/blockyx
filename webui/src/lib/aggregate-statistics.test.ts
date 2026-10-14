@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { StatisticsResult } from "~/components/dashboard/server-context";
 import {
   aggregateStatistics,
   aggregateStatisticsTraffic,
 } from "~/lib/aggregate-statistics";
-import type { StatisticsResult } from "~/components/dashboard/server-context";
 
 type Result = StatisticsResult;
 

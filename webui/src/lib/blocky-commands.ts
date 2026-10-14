@@ -19,9 +19,7 @@ export const commandSchema = z.discriminatedUnion("action", [
 ]);
 
 export async function readBlockingStatus(client: KyInstance) {
-  return blockingStatusSchema.parse(
-    await client.get("blocking/status").json(),
-  );
+  return blockingStatusSchema.parse(await client.get("blocking/status").json());
 }
 
 export async function executeCommand(

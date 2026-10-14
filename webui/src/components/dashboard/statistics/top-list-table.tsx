@@ -2,7 +2,6 @@
 
 import { Globe, type LucideIcon, Users } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useDashboardServers } from "~/components/dashboard/server-context";
 import { useLogTopList } from "~/hooks/use-log-top-list";
 
 import type { TimeRange } from "~/lib/constants";
@@ -43,7 +42,6 @@ export function TopListTable({
   onPageChange,
 }: TopListTableProps) {
   const [filter, setFilter] = useState<TopListFilter>("all");
-  const dashboard = useDashboardServers();
   const query = useLogTopList({
     type,
     range,
@@ -51,7 +49,6 @@ export function TopListTable({
     offset: page * limit,
     filter,
   });
-  const totalPages = Math.ceil((query.data?.totalCount ?? 0) / limit);
   const config = TOP_LIST_CONFIG[type];
 
   const handleFilterChange = useCallback(

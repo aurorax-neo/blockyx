@@ -22,7 +22,7 @@ import {
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { useServerQuery } from "~/hooks/use-server-query";
-import { parseBlockyQueryResult } from "~/lib/blocky-query";
+import type { parseBlockyQueryResult } from "~/lib/blocky-query";
 import { BLOCKY_DNS_RECORD_TYPES } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
@@ -121,16 +121,21 @@ function QueryResultPane({
             <p className="text-muted-foreground text-sm">No answer returned</p>
           ) : (
             <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-2">
-              {keyedAnswers.map(({ answer, key }: { answer: string; key: string }, index: number) => (
-                <div key={key} className="flex items-baseline gap-3">
-                  <span className="font-mono text-muted-foreground text-xs">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="min-w-0 select-text break-all font-mono text-lg">
-                    {answer}
-                  </span>
-                </div>
-              ))}
+              {keyedAnswers.map(
+                (
+                  { answer, key }: { answer: string; key: string },
+                  index: number,
+                ) => (
+                  <div key={key} className="flex items-baseline gap-3">
+                    <span className="font-mono text-muted-foreground text-xs">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="min-w-0 select-text break-all font-mono text-lg">
+                      {answer}
+                    </span>
+                  </div>
+                ),
+              )}
             </div>
           )}
         </div>

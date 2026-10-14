@@ -13,18 +13,22 @@ RUN apk add --no-cache g++ make python3 \
 COPY webui/package.json webui/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY webui/ ./
-RUN SKIP_ENV_VALIDATION=true bun run build
+RUN bun run build
 
 # ---------- Go builder ----------
 FROM golang:1.26.2-alpine AS go-builder
 WORKDIR /build
+ARG VERSION=dev
+ARG TARGETARCH
 RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
 # Embed the statically exported UI into the binary.
 COPY --from=webui-builder /build/webui/out ./web/ui-out
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /blockyx .
+RUN CGO_ENABLED=0 go build -trimpath \
+  -ldflags="-s -w -X github.com/0xERR0R/blocky/util.Version=${VERSION} -X github.com/0xERR0R/blocky/util.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/0xERR0R/blocky/util.Architecture=${TARGETARCH}" \
+  -o /blockyx .
 
 # ---------- runner (single binary) ----------
 FROM alpine:3.24
@@ -47,6 +51,10 @@ RUN chmod +x entrypoint.sh && chown blockyx:blockyx entrypoint.sh
 USER blockyx
 
 EXPOSE 53/udp 53/tcp 4000
+
+# The web UI root (/) is unauthenticated; the API needs the key.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:4000/ || exit 1
 
 ENV BLOCKYX_CONFIG=/etc/blockyx/config.yml
 

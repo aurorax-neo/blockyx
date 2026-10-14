@@ -9,8 +9,8 @@ import {
   type StatisticsResult,
 } from "~/components/dashboard/server-context";
 import {
-  DEFAULT_SERVER,
   createApiClient,
+  DEFAULT_SERVER,
   type StatusResult,
 } from "~/lib/blocky-api";
 import { readBlockingStatus } from "~/lib/blocky-commands";
@@ -21,10 +21,16 @@ import {
 
 const singleSelection: ServerSelection = {
   selected: () => ["default"],
-  toggle: () => () => {},
+  toggle: () => noopToggle,
 };
 
-function noopDiagnostics() {}
+function noopToggle(): void {
+  // Single-server mode: selection never changes.
+}
+
+function noopDiagnostics(): void {
+  // Single-server mode: no per-server diagnostics.
+}
 
 export function ConnectedDashboard({ apiKey }: { apiKey: string }) {
   const client = useMemo(() => createApiClient(apiKey), [apiKey]);
@@ -114,7 +120,9 @@ export function ConnectedDashboard({ apiKey }: { apiKey: string }) {
             className="space-y-1 rounded-lg border bg-card px-4 py-3 text-sm"
           >
             {failed || statistics.error ? (
-              <p className="text-amber-400">Unable to load server statistics.</p>
+              <p className="text-amber-400">
+                Unable to load server statistics.
+              </p>
             ) : null}
             <p className="text-muted-foreground text-xs">
               Showing available data. Stored logs do not require a live server

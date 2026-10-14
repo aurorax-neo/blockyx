@@ -3,6 +3,8 @@ dist
 site
 node_modules
 webui/.next
+webui/out
+web/ui-out
 .git
 .idea
 .github

@@ -1,12 +1,10 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { BarChart3 } from "lucide-react";
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { useQuery } from "@tanstack/react-query";
-import { createApiClient } from "~/lib/blocky-api";
-import { fetchLogOverTime } from "~/lib/querylog-api";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -22,7 +20,9 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "~/components/ui/chart";
+import { createApiClient } from "~/lib/blocky-api";
 import type { TimeRange } from "~/lib/constants";
+import { fetchLogOverTime } from "~/lib/querylog-api";
 import { cn } from "~/lib/utils";
 import {
   ActiveFilterChip,
@@ -230,6 +230,8 @@ export function QueriesOverTimeChart({
         return { rangeMs: 7 * 86_400_000, interval: "6h" };
       case "30d":
         return { rangeMs: 30 * 86_400_000, interval: "24h" };
+      default:
+        return { rangeMs: 86_400_000, interval: "1h" };
     }
   }, [range]);
 

@@ -37,6 +37,8 @@ function rangeToMs(range: TimeRange): number {
       return 7 * 86_400_000;
     case "30d":
       return 30 * 86_400_000;
+    default:
+      return 86_400_000;
   }
 }
 

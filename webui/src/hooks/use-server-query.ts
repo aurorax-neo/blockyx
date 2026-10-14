@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createApiClient } from "~/lib/blocky-api";
 import { parseBlockyQueryResult } from "~/lib/blocky-query";
-import { BLOCKY_DNS_RECORD_TYPES } from "~/lib/constants";
+import type { BLOCKY_DNS_RECORD_TYPES } from "~/lib/constants";
 
 export interface QueryInput {
   query: string;
@@ -64,6 +64,3 @@ export function useServerQuery() {
     pendingServerIds: isPending ? ["default"] : [],
   };
 }
-
-// Re-export for components that referenced the tRPC-era types.
-export type { QueryInput as ServerQueryInput };

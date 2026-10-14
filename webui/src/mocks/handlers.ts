@@ -40,7 +40,7 @@ function getBlockingState(request: Request): BlockingState {
 }
 
 export const handlers = [
-  http.get(`http://localhost:4000/api/blocking/status`, ({ request }) => {
+  http.get("http://localhost:4000/api/blocking/status", ({ request }) => {
     const blockingState = getBlockingState(request);
     let remainingSeconds = blockingState.autoEnableInSec;
     if (
@@ -74,7 +74,7 @@ export const handlers = [
     });
   }),
 
-  http.get(`http://localhost:4000/api/blocking/enable`, ({ request }) => {
+  http.get("http://localhost:4000/api/blocking/enable", ({ request }) => {
     Object.assign(getBlockingState(request), {
       enabled: true,
       autoEnableInSec: 0,
@@ -84,7 +84,7 @@ export const handlers = [
     return new HttpResponse(null, { status: 200 });
   }),
 
-  http.get(`http://localhost:4000/api/blocking/disable`, ({ request }) => {
+  http.get("http://localhost:4000/api/blocking/disable", ({ request }) => {
     const url = new URL(request.url);
     const duration = url.searchParams.get("duration");
     const groups = url.searchParams.get("groups")?.split(",") ?? [];
@@ -122,7 +122,7 @@ export const handlers = [
     return new HttpResponse(null, { status: 200 });
   }),
 
-  http.post(`http://localhost:4000/api/query`, () =>
+  http.post("http://localhost:4000/api/query", () =>
     HttpResponse.json<QueryResult>({
       reason: "MOCK",
       response: "93.184.216.34",
@@ -132,16 +132,16 @@ export const handlers = [
   ),
 
   http.post(
-    `http://localhost:4000/api/cache/flush`,
+    "http://localhost:4000/api/cache/flush",
     () => new HttpResponse(null, { status: 200 }),
   ),
 
   http.post(
-    `http://localhost:4000/api/lists/refresh`,
+    "http://localhost:4000/api/lists/refresh",
     () => new HttpResponse(null, { status: 200 }),
   ),
 
-  http.get(`http://localhost:4000/api/stats`, () => {
+  http.get("http://localhost:4000/api/stats", () => {
     const end = new Date();
     const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
     const hour = new Date(end);

@@ -23,7 +23,10 @@ export interface QueryLogFilters {
   rtype?: string;
 }
 
-function params(filters: QueryLogFilters, extra: Record<string, string | number> = {}) {
+function params(
+  filters: QueryLogFilters,
+  extra: Record<string, string | number> = {},
+) {
   const search = new URLSearchParams();
 
   for (const [key, value] of Object.entries({ ...filters, ...extra })) {
@@ -65,7 +68,9 @@ export async function fetchLogOverTime(
   filters: QueryLogFilters,
   interval: string,
 ): Promise<{ items: OverTimeBucket[] }> {
-  return client.get(`querylog/over-time?${params(filters, { interval })}`).json();
+  return client
+    .get(`querylog/over-time?${params(filters, { interval })}`)
+    .json();
 }
 
 export interface TopEntry {
@@ -94,11 +99,4 @@ export async function searchLogNames(
   q: string,
 ): Promise<{ items: { name: string; count: number }[] }> {
   return client.get(`querylog/search?${params(filters, { type, q })}`).json();
-}
-
-export async function fetchQueryTypes(
-  client: KyInstance,
-  filters: QueryLogFilters,
-): Promise<{ items: { type: string; count: number }[] }> {
-  return client.get(`querylog/query-types?${params(filters)}`).json();
 }

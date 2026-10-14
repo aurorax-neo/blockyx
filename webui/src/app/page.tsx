@@ -19,6 +19,10 @@ export default function HomePage() {
     setApiKey(null);
   }, []);
 
+  const onLoginSuccess = useCallback(() => {
+    setApiKey(getApiKey());
+  }, []);
+
   if (apiKey === undefined) {
     return null;
   }
@@ -27,7 +31,7 @@ export default function HomePage() {
     return (
       <main className="container mx-auto flex min-h-svh max-w-md flex-col items-center justify-center px-4 py-8">
         <h1 className="mb-8 font-bold font-title text-5xl">{"> "}BlockyUI</h1>
-        <LoginForm onSuccess={() => setApiKey(getApiKey())} />
+        <LoginForm onSuccess={onLoginSuccess} />
       </main>
     );
   }
