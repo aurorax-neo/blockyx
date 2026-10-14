@@ -1,0 +1,66 @@
+name: UI Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to screenshot (or "local" to build and serve the UI)'
+        required: false
+        default: 'local'
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Serve UI
+        working-directory: frontend/out
+        run: |
+          npx --yes serve -l 3000 &
+          sleep 5
+          curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/
+
+      - name: Setup Playwright
+        run: |
+          npx --yes playwright install chromium --with-deps
+
+      - name: Take screenshots
+        run: |
+          cat > /tmp/shot.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch();
+          const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+          
+          // Login page
+          await page.goto('http://127.0.0.1:3000/', { waitUntil: 'networkidle' });
+          await page.waitForTimeout(2000);
+          await page.screenshot({ path: '/tmp/login.png', fullPage: false });
+          console.log('login.png done');
+          
+          await browser.close();
+          EOF
+          node /tmp/shot.mjs
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: /tmp/*.png
+          retention-days: 7
