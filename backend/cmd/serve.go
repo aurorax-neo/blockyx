@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/evt"
 	"github.com/0xERR0R/blocky/log"
@@ -63,6 +65,45 @@ func generateAPIKey() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// persistAPIKey writes the generated API key back to the config file
+// (0600 permissions) so it survives restarts. Returns nil when the
+// config path is empty or the file can't be updated — the caller
+// should still print the key to stderr in that case.
+func persistAPIKey(configPath, key string) error {
+	if configPath == "" {
+		return fmt.Errorf("no config file path")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	var cfg map[interface{}]interface{}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+
+	if cfg == nil {
+		cfg = make(map[interface{}]interface{})
+	}
+
+	api, ok := cfg["api"].(map[interface{}]interface{})
+	if !ok {
+		api = make(map[interface{}]interface{})
+		cfg["api"] = api
+	}
+
+	api["apiKey"] = key
+
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(configPath, out, 0600)
+}
+
 func warnMissingPrivilegedPortCapability(ports config.Ports) {	effective, err := raiseNetBindService()
 	if err != nil {
 		if privileged := ports.PrivilegedPorts(); len(privileged) > 0 {
@@ -102,7 +143,8 @@ func startServer(_ *cobra.Command, _ []string) error {
 	}
 
 	// Security requirement: the server must never run without an API key.
-	// Generate a random one when none is configured (printed to stderr).
+	// Generate a random one when none is configured, persist it to the
+	// config file so it survives restarts, and print it to stderr.
 	if cfg.API.APIKey.Reveal() == "" {
 		key, err := generateAPIKey()
 		if err != nil {
@@ -111,7 +153,13 @@ func startServer(_ *cobra.Command, _ []string) error {
 
 		cfg.API.APIKey = config.Secret(key)
 
-		fmt.Fprintf(os.Stderr, "blockyx: no API key configured, generated one: %s\n", key)
+		if err := persistAPIKey(configPath, key); err != nil {
+			fmt.Fprintf(os.Stderr, "blockyx: no API key configured, generated one: %s\n", key)
+			fmt.Fprintf(os.Stderr, "blockyx: could not persist to config file (%v); this key is valid for this run only\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "blockyx: no API key configured, generated one and saved to %s: %s\n", configPath, key)
+		}
+
 		fmt.Fprintf(os.Stderr, "blockyx: set api.apiKey in config or BLOCKYX_API_KEY env var to use your own\n")
 	}
 

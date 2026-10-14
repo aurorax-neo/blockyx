@@ -158,6 +158,5 @@ var _ = Describe("Serve command", func() {
 				}
 			})
 		})
-		})
 	})
 })
