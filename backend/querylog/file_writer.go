@@ -9,8 +9,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/log"
 	"github.com/0xERR0R/blocky/util"
 	"github.com/sirupsen/logrus"
@@ -23,25 +25,33 @@ const (
 
 var validFilePattern = regexp.MustCompile("[^a-zA-Z0-9-_]+")
 
+// seqPattern matches the trailing _NNN sequence in rotated file names.
+var seqPattern = regexp.MustCompile(`_(\d{3})\.log$`)
+
 type FileWriter struct {
 	target    string
 	perClient bool
 	retention time.Duration
-	rotation  time.Duration
+	rotation  uint64 // max bytes per file before rotating
+
+	mu          sync.Mutex
+	currentBase string
+	currentSeq  int
+	currentSize uint64
 }
 
 func NewCSVWriter(
 	target string,
 	perClient bool,
 	retention time.Duration,
-	rotation time.Duration,
+	rotation uint64,
 ) (*FileWriter, error) {
 	if _, err := os.Stat(target); target != "" && err != nil && os.IsNotExist(err) {
 		return nil, fmt.Errorf("query log directory '%s' does not exist or is not writable", target)
 	}
 
 	if rotation == 0 {
-		rotation = 24 * time.Hour
+		rotation = 100 * config.Megabyte
 	}
 
 	return &FileWriter{
@@ -52,20 +62,10 @@ func NewCSVWriter(
 	}, nil
 }
 
-// fileName returns the log file name for the given entry, honoring the
-// configured rotation granularity. The leading date part is always
-// 2006-01-02 so retention cleanup keeps working across rotations.
-func (d *FileWriter) fileName(entry *LogEntry) string {
-	var datePart string
-
-	switch {
-	case d.rotation >= 24*time.Hour:
-		datePart = entry.Start.Format("2006-01-02")
-	case d.rotation >= time.Hour:
-		datePart = entry.Start.Format("2006-01-02_15")
-	default:
-		datePart = entry.Start.Format("2006-01-02_15-04")
-	}
+// baseName returns the date + client prefix for the given entry.
+// The leading date part is always 2006-01-02 so retention cleanup keeps working.
+func (d *FileWriter) baseName(entry *LogEntry) string {
+	datePart := entry.Start.Format("2006-01-02")
 
 	var clientPrefix string
 
@@ -75,25 +75,99 @@ func (d *FileWriter) fileName(entry *LogEntry) string {
 		clientPrefix = "ALL"
 	}
 
-	return fmt.Sprintf("%s_%s.log", datePart, escape(clientPrefix))
+	return fmt.Sprintf("%s_%s", datePart, escape(clientPrefix))
+}
+
+// fileName returns the full file name for the current sequence.
+func (d *FileWriter) fileName(base string, seq int) string {
+	return fmt.Sprintf("%s_%03d.log", base, seq)
+}
+
+// ensureCurrent locks and makes sure currentSeq/currentSize point at the right
+// file for the given base, scanning the directory on base change (e.g. new day
+// or restart) to continue the existing sequence.
+func (d *FileWriter) ensureCurrent(base string) {
+	if base == d.currentBase {
+		return
+	}
+
+	d.currentBase = base
+	d.currentSeq = 1
+	d.currentSize = 0
+
+	// Continue the sequence if files already exist (e.g. after restart)
+	files, err := os.ReadDir(d.target)
+	if err != nil {
+		return
+	}
+
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasPrefix(name, base+"_") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+
+		m := seqPattern.FindStringSubmatch(name)
+		if m == nil {
+			continue
+		}
+
+		seq, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+
+		if seq >= d.currentSeq {
+			d.currentSeq = seq
+
+			if info, err := f.Info(); err == nil {
+				d.currentSize = uint64(info.Size())
+			}
+		}
+	}
 }
 
 func (d *FileWriter) Write(entry *LogEntry) {
-	writePath := filepath.Join(d.target, d.fileName(entry))
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	base := d.baseName(entry)
+	d.ensureCurrent(base)
+
+	// Rotate when the current file reached the size limit
+	if d.currentSize >= d.rotation {
+		d.currentSeq++
+		d.currentSize = 0
+	}
+
+	writePath := filepath.Join(d.target, d.fileName(base, d.currentSeq))
 
 	file, err := os.OpenFile(writePath, os.O_APPEND|os.O_CREATE|os.O_RDWR, filePermission)
 
 	util.LogOnErrorWithEntry(log.PrefixedLog(loggerPrefixFileWriter).WithField("file_name", writePath),
 		"can't create/open file", err)
 
-	if err == nil {
-		defer file.Close()
-		writer := createCsvWriter(file)
+	if err != nil {
+		return
+	}
 
-		err := writer.Write(createQueryLogRow(entry))
+	defer file.Close()
+
+	writer := createCsvWriter(file)
+
+	row := createQueryLogRow(entry)
+	if err := writer.Write(row); err != nil {
 		util.LogOnErrorWithEntry(log.PrefixedLog(loggerPrefixFileWriter).WithField("file_name", writePath),
 			"can't write to file", err)
-		writer.Flush()
+
+		return
+	}
+
+	writer.Flush()
+
+	// Track size: stat is cheap enough here and stays correct across restarts
+	if info, err := file.Stat(); err == nil {
+		d.currentSize = uint64(info.Size())
 	}
 }
 

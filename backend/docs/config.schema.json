@@ -772,19 +772,8 @@
           ]
         },
         "rotation": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            }
-          ],
-          "description": "Time granularity of CSV query log files as a duration (blockyx extension).\nExample: 24h (one file per day: 2006-01-02_ALL.log),\n1h (one file per hour: 2006-01-02_15_ALL.log),\n1m (one file per minute: 2006-01-02_15-04_ALL.log).\nOnly applies to the csv and csv-client types.",
-          "examples": [
-            "30s",
-            "1h"
-          ]
+          "type": "integer",
+          "description": "Maximum size of a single CSV query log file before rotating to a new one\n(blockyx extension). Example: 100MB, 1GB.\nOnly applies to the csv and csv-client types."
         },
         "ignore": {
           "properties": {

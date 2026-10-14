@@ -18,14 +18,14 @@ statistics:
     retentionDays: 30
     flushInterval: 5m
 
-# Query log with configurable file granularity (blockyx extension):
-# 24h -> 2006-01-02_ALL.log (one file per day)
-# 1h  -> 2006-01-02_15_ALL.log (one file per hour)
-# 1m  -> 2006-01-02_15-04_ALL.log (one file per minute)
+# Query log with configurable file rotation (blockyx extension):
+# rotation: max size per file before rotating (e.g. 100MB, 1GB)
+#   -> 2006-01-02_ALL_001.log, 2006-01-02_ALL_002.log, ...
+# retention: how long to keep log files (e.g. 7d, 30d)
 queryLog:
   type: csv
   target: /logs
-  rotation: 24h
+  rotation: 100MB
   retention: 7d
 
 # API key authentication (blockyx extension). REQUIRED: the binary refuses

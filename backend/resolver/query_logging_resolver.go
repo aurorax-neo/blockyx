@@ -45,10 +45,10 @@ type QueryLoggingResolver struct {
 	ignoreDomains stringcache.GroupedStringCache
 }
 
-func validateRotation(rotation config.Duration) error {
-	if rotation.ToDuration() <= 0 {
+func validateRotation(rotation config.Size) error {
+	if rotation.Bytes() == 0 {
 		return fmt.Errorf(
-			"invalid query log rotation '%s': must be a positive duration (e.g. 24h, 1h, 1m)",
+			"invalid query log rotation '%s': must be a positive size (e.g. 100MB, 1GB)",
 			rotation,
 		)
 	}
@@ -68,7 +68,7 @@ func GetQueryLoggingWriter(ctx context.Context, cfg config.QueryLog, instanceID 
 		}
 
 		perClient := cfg.Type == config.QueryLogTypeCsvClient
-		writer, err = querylog.NewCSVWriter(cfg.Target.Reveal(), perClient, cfg.Retention.ToDuration(), cfg.Rotation.ToDuration())
+		writer, err = querylog.NewCSVWriter(cfg.Target.Reveal(), perClient, cfg.Retention.ToDuration(), cfg.Rotation.Bytes())
 	case config.QueryLogTypeMysql, config.QueryLogTypePostgresql, config.QueryLogTypeTimescale, config.QueryLogTypeSqlite:
 		// The database-backed targets share one writer; it selects the driver and
 		// migration from the typed QueryLogType, so no per-type string is threaded through.

@@ -30,13 +30,13 @@ var _ = Describe("FileWriter", func() {
 	Describe("CSV writer", func() {
 		When("target dir does not exist", func() {
 			It("should return error", func() {
-				_, err = NewCSVWriter("wrongdir", false, 0, 24*time.Hour)
+				_, err = NewCSVWriter("wrongdir", false, 0, 100*1024*1024)
 				Expect(err).Should(HaveOccurred())
 			})
 		})
 		When("New log entry was created", func() {
 			It("should be logged in one file", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 24*time.Hour)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 100*1024*1024)
 
 				Expect(err).Should(Succeed())
 
@@ -58,12 +58,12 @@ var _ = Describe("FileWriter", func() {
 
 				Eventually(func(g Gomega) int {
 					return len(readCsv(tmpDir.JoinPath(
-						time.Now().Format("2006-01-02") + "_ALL.log")))
+						time.Now().Format("2006-01-02") + "_ALL_001.log")))
 				}).Should(Equal(2))
 			})
 
 			It("should be logged in separate files per client", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, true, 0, 24*time.Hour)
+				writer, err = NewCSVWriter(tmpDir.Path, true, 0, 100*1024*1024)
 
 				Expect(err).Should(Succeed())
 
@@ -85,64 +85,48 @@ var _ = Describe("FileWriter", func() {
 
 				Eventually(func(g Gomega) int {
 					return len(readCsv(tmpDir.JoinPath(
-						time.Now().Format("2006-01-02") + "_client1.log")))
+						time.Now().Format("2006-01-02") + "_client1_001.log")))
 				}).Should(Equal(1))
 
 				Eventually(func(g Gomega) int {
 					return len(readCsv(tmpDir.JoinPath(
-						time.Now().Format("2006-01-02") + "_client2.log")))
+						time.Now().Format("2006-01-02") + "_client2_001.log")))
 				}).Should(Equal(1))
 			})
 		})
-		When("rotation is hourly", func() {
-			It("should write one file per hour", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, time.Hour)
+		When("rotation size is exceeded", func() {
+			It("should rotate to a new file", func() {
+				// tiny rotation size to force rotation (one entry is ~35 bytes)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 100)
 
 				Expect(err).Should(Succeed())
 
 				now := time.Now()
-				writer.Write(&LogEntry{
-					ClientNames: []string{"client1"},
-					Start:       now,
-					DurationMs:  20,
-				})
-				writer.Write(&LogEntry{
-					ClientNames: []string{"client1"},
-					Start:       now.Add(-2 * time.Hour),
-					DurationMs:  20,
-				})
+				for i := 0; i < 5; i++ {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client1"},
+						Start:       now,
+						DurationMs:  20,
+					})
+				}
 
+				base := now.Format("2006-01-02") + "_ALL"
 				Eventually(func(g Gomega) int {
-					return len(readCsv(tmpDir.JoinPath(
-						now.Format("2006-01-02_15") + "_ALL.log")))
-				}).Should(Equal(1))
-				Eventually(func(g Gomega) int {
-					return len(readCsv(tmpDir.JoinPath(
-						now.Add(-2 * time.Hour).Format("2006-01-02_15") + "_ALL.log")))
-				}).Should(Equal(1))
-			})
-		})
-		When("rotation is minutely", func() {
-			It("should write one file per minute", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 0, time.Minute)
+					files, _ := os.ReadDir(tmpDir.Path)
+					count := 0
 
-				Expect(err).Should(Succeed())
+					for _, f := range files {
+						if len(f.Name()) > len(base) && f.Name()[:len(base)] == base {
+							count++
+						}
+					}
 
-				now := time.Now()
-				writer.Write(&LogEntry{
-					ClientNames: []string{"client1"},
-					Start:       now,
-					DurationMs:  20,
-				})
-
-				Eventually(func(g Gomega) int {
-					return len(readCsv(tmpDir.JoinPath(
-						now.Format("2006-01-02_15-04") + "_ALL.log")))
-				}).Should(Equal(1))
+					return count
+				}).Should(BeNumerically(">", 1))
 			})
 		})
 		When("rotation is empty", func() {
-			It("should default to daily", func() {
+			It("should default to 100MB", func() {
 				writer, err = NewCSVWriter(tmpDir.Path, false, 0, 0)
 
 				Expect(err).Should(Succeed())
@@ -155,13 +139,13 @@ var _ = Describe("FileWriter", func() {
 
 				Eventually(func(g Gomega) int {
 					return len(readCsv(tmpDir.JoinPath(
-						time.Now().Format("2006-01-02") + "_ALL.log")))
+						time.Now().Format("2006-01-02") + "_ALL_001.log")))
 				}).Should(Equal(1))
 			})
 		})
 		When("Cleanup is called", func() {
 			It("should delete old files", func() {
-				writer, err = NewCSVWriter(tmpDir.Path, false, 24*time.Hour, 24*time.Hour)
+				writer, err = NewCSVWriter(tmpDir.Path, false, 24*time.Hour, 100*1024*1024)
 
 				Expect(err).Should(Succeed())
 

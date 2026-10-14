@@ -3,7 +3,6 @@ package config
 import (
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/0xERR0R/blocky/log"
 	"github.com/sirupsen/logrus"
@@ -28,12 +27,10 @@ type QueryLog struct {
 	// Interval at which buffered log entries are flushed in bulk to the database or dnstap socket
 	// (used by the mysql, postgresql, timescale, sqlite and dnstap targets).
 	FlushInterval Duration `default:"30s" yaml:"flushInterval"`
-	// Time granularity of CSV query log files as a duration (blockyx extension).
-	// Example: 24h (one file per day: 2006-01-02_ALL.log),
-	// 1h (one file per hour: 2006-01-02_15_ALL.log),
-	// 1m (one file per minute: 2006-01-02_15-04_ALL.log).
+	// Maximum size of a single CSV query log file before rotating to a new one
+	// (blockyx extension). Example: 100MB, 1GB.
 	// Only applies to the csv and csv-client types.
-	Rotation Duration `yaml:"rotation"`
+	Rotation Size `yaml:"rotation"`
 	// Rules to suppress certain queries from being logged.
 	Ignore QueryLogIgnore `yaml:"ignore"`
 }
@@ -53,7 +50,7 @@ func (c *QueryLog) SetDefaults() {
 	c.Fields = QueryLogFieldValues()
 
 	if c.Rotation == 0 {
-		c.Rotation = Duration(24 * time.Hour)
+		c.Rotation = Size(100 * Megabyte)
 	}
 }
 

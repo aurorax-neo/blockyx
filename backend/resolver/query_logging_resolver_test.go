@@ -547,7 +547,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 			writer, err := GetQueryLoggingWriter(ctx, config.QueryLog{
 				Type:     config.QueryLogTypeCsv,
 				Target:   config.Secret(tmpDir),
-				Rotation: config.Duration(time.Hour),
+				Rotation: config.Size(100 * config.Megabyte),
 			}, "test-instance")
 
 			Expect(err).Should(Succeed())
@@ -561,7 +561,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 			_, err := GetQueryLoggingWriter(ctx, config.QueryLog{
 				Type:     config.QueryLogTypeCsv,
 				Target:   config.Secret(tmpDir),
-				Rotation: config.Duration(-1 * time.Hour),
+				Rotation: config.Size(0),
 			}, "test-instance")
 
 			Expect(err).Should(HaveOccurred())
