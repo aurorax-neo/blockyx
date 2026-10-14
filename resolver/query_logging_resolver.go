@@ -1,0 +1,391 @@
+package resolver
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/0xERR0R/blocky/cache/stringcache"
+	"github.com/0xERR0R/blocky/config"
+	"github.com/0xERR0R/blocky/log"
+	"github.com/0xERR0R/blocky/model"
+	"github.com/0xERR0R/blocky/querylog"
+	"github.com/0xERR0R/blocky/util"
+	"github.com/avast/retry-go/v4"
+	"github.com/miekg/dns"
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	cleanUpRunPeriod         = 12 * time.Hour
+	queryLoggingResolverType = "query_logging"
+	logChanCap               = 1000
+	defaultClientIP          = "0.0.0.0"
+	queryLogIgnoreGroup      = "ignore"
+)
+
+// queryLogIgnoreGroups is the (single) cache group queried for ignore rules.
+// Hoisted to avoid allocating a one-element slice on every resolved query.
+var queryLogIgnoreGroups = []string{queryLogIgnoreGroup} //nolint:gochecknoglobals
+
+// QueryLoggingResolver writes query information (question, answer, duration, ...)
+type QueryLoggingResolver struct {
+	configurable[*config.QueryLog]
+	NextResolver
+	typed
+
+	logChan       chan *querylog.LogEntry
+	writer        querylog.Writer
+	instanceID    string
+	ignoreDomains stringcache.GroupedStringCache
+}
+
+func validateRotation(rotation config.QueryLogRotation) error {
+	switch rotation {
+	case "", config.QueryLogRotationDaily, config.QueryLogRotationHourly, config.QueryLogRotationMinutely:
+		return nil
+	default:
+		return fmt.Errorf(
+			"invalid query log rotation '%s': must be one of daily, hourly, minutely",
+			rotation,
+		)
+	}
+}
+
+func GetQueryLoggingWriter(ctx context.Context, cfg config.QueryLog, instanceID string) (querylog.Writer, error) {
+	var writer querylog.Writer
+
+	var err error
+
+	switch cfg.Type {
+	case config.QueryLogTypeCsv, config.QueryLogTypeCsvClient:
+		if err := validateRotation(cfg.Rotation); err != nil {
+			return nil, err
+		}
+
+		perClient := cfg.Type == config.QueryLogTypeCsvClient
+		writer, err = querylog.NewCSVWriter(cfg.Target.Reveal(), perClient, cfg.LogRetentionDays, cfg.Rotation)
+	case config.QueryLogTypeMysql, config.QueryLogTypePostgresql, config.QueryLogTypeTimescale, config.QueryLogTypeSqlite:
+		// The database-backed targets share one writer; it selects the driver and
+		// migration from the typed QueryLogType, so no per-type string is threaded through.
+		writer, err = querylog.NewDatabaseWriter(ctx, cfg.Type, cfg.Target.Reveal(), cfg.LogRetentionDays,
+			cfg.FlushInterval.ToDuration())
+	case config.QueryLogTypeConsole:
+		writer = querylog.NewLoggerWriter()
+	case config.QueryLogTypeNone:
+		writer = querylog.NewNoneWriter()
+	case config.QueryLogTypeDnstap:
+		writer, err = querylog.NewDnstapWriter(cfg.Target.Reveal(), cfg.FlushInterval.ToDuration(), instanceID)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create query log writer (type: %s): %w", cfg.Type, err)
+	}
+
+	return writer, nil
+}
+
+// newIgnoreDomainsMatcher builds a matcher for the queryLog.ignore.domains rules.
+// Returns nil when no domains are configured, so the per-query path stays free.
+func newIgnoreDomainsMatcher(domains []string, logger *logrus.Entry) stringcache.GroupedStringCache {
+	if len(domains) == 0 {
+		return nil
+	}
+
+	matcher := stringcache.NewChainedGroupedCache(
+		stringcache.NewInMemoryGroupedRegexCache(),
+		stringcache.NewInMemoryGroupedWildcardCache(), // must follow regex (regex can contain '*')
+		stringcache.NewInMemoryGroupedStringCache(),
+	)
+
+	factory := matcher.Refresh(queryLogIgnoreGroup)
+
+	for _, d := range domains {
+		// Pre-validate regex entries so we can warn via the caller's logger rather
+		// than the global one (the underlying cache silently drops invalid regex,
+		// and a lone "/" would panic the regex cache's unguarded slice).
+		if strings.HasPrefix(d, "/") && strings.HasSuffix(d, "/") {
+			// Strip the surrounding slashes. Reject entries with no actual pattern
+			// (e.g. "/", "//", "/ /"): an empty regex matches every domain and would
+			// silently drop the whole query log.
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(d, "/"), "/"))
+			if inner == "" {
+				logger.Warnf("ignoring invalid queryLog.ignore.domains entry: %q", d)
+
+				continue
+			}
+
+			if _, err := regexp.Compile(inner); err != nil {
+				logger.Warnf("ignoring invalid queryLog.ignore.domains entry: %q", d)
+
+				continue
+			}
+		}
+
+		factory.AddEntry(d)
+	}
+
+	factory.Finish()
+
+	return matcher
+}
+
+// NewQueryLoggingResolver returns a new resolver instance
+func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) (*QueryLoggingResolver, error) {
+	logger := log.PrefixedLog(queryLoggingResolverType)
+
+	var writer querylog.Writer
+
+	instanceID, err := readInstanceID("/etc/hostname")
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine instance ID for query logging: %w", err)
+	}
+
+	err = retry.Do(
+		func() error {
+			var err error
+
+			writer, err = GetQueryLoggingWriter(ctx, cfg, instanceID)
+
+			return err
+		},
+		retry.Attempts(uint(cfg.CreationAttempts)),
+		retry.DelayType(retry.FixedDelay),
+		retry.Delay(cfg.CreationCooldown.ToDuration()),
+		retry.OnRetry(func(n uint, err error) {
+			logger.Warnf(
+				"Error occurred on query writer creation, retry attempt %d/%d: %v", n+1, cfg.CreationAttempts, err,
+			)
+		}))
+	if err != nil {
+		logger.Error("can't create query log writer, using console as fallback: ", err)
+
+		writer = querylog.NewLoggerWriter()
+		cfg.Type = config.QueryLogTypeConsole
+	}
+
+	logChan := make(chan *querylog.LogEntry, logChanCap)
+
+	ignoreDomains := newIgnoreDomainsMatcher(cfg.Ignore.Domains, logger)
+
+	resolver := QueryLoggingResolver{
+		configurable: withConfig(&cfg),
+		typed:        withType(queryLoggingResolverType),
+
+		logChan:       logChan,
+		writer:        writer,
+		instanceID:    instanceID,
+		ignoreDomains: ignoreDomains,
+	}
+
+	go resolver.writeLog(ctx)
+
+	// Timescale uses database features for retention
+	if cfg.LogRetentionDays > 0 &&
+		cfg.Type != config.QueryLogTypeTimescale &&
+		cfg.Type != config.QueryLogTypeDnstap {
+		go resolver.periodicCleanUp(ctx)
+	}
+
+	return &resolver, nil
+}
+
+// triggers periodically cleanup of old log files
+func (r *QueryLoggingResolver) periodicCleanUp(ctx context.Context) {
+	ticker := time.NewTicker(cleanUpRunPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.doCleanUp()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (r *QueryLoggingResolver) doCleanUp() {
+	r.writer.CleanUp()
+}
+
+// Resolve logs the query, duration and the result
+func (r *QueryLoggingResolver) Resolve(ctx context.Context, request *model.Request) (*model.Response, error) {
+	// Query logging disabled: nothing this resolver does has any effect, so skip
+	// the per-request work (logger derivation, entry building) entirely.
+	if r.cfg.Type == config.QueryLogTypeNone {
+		return r.next.Resolve(ctx, request)
+	}
+
+	ctx, logger := r.log(ctx)
+
+	start := time.Now()
+	resp, err := r.next.Resolve(ctx, request)
+	duration := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if r.ignore(request, resp) {
+		// Build the entry only to explain (in the debug log) why it was ignored,
+		// and only when that debug line would actually be emitted.
+		if isDebugEnabled(logger) {
+			if entry := r.createLogEntry(request, resp, start, duration); entry != nil {
+				logger.WithFields(querylog.LogEntryFields(entry)).Debug("ignored querylog entry")
+			}
+		}
+
+		return resp, nil
+	}
+
+	entry := r.createLogEntry(request, resp, start, duration)
+	if entry == nil {
+		return resp, nil
+	}
+
+	select {
+	case r.logChan <- entry:
+	default:
+		logger.Error("query log writer is too slow, log entry will be dropped")
+	}
+
+	return resp, nil
+}
+
+func (r *QueryLoggingResolver) ignore(request *model.Request, response *model.Response) bool {
+	cfg := r.cfg.Ignore
+
+	if cfg.SUDN && response.RType == model.ResponseTypeSPECIAL {
+		return true
+	}
+
+	if r.ignoreDomains != nil {
+		domain := util.ExtractDomain(request.Req.Question[0])
+		if len(r.ignoreDomains.Contains(domain, queryLogIgnoreGroups)) > 0 {
+			return true
+		}
+	}
+
+	// If we add more ways to ignore entries, it would be nice to log why it's ignored in the debug log
+	// Probably make this func return a (string, bool).
+
+	return false
+}
+
+func (r *QueryLoggingResolver) createLogEntry(request *model.Request, response *model.Response,
+	start time.Time, durationMs int64,
+) *querylog.LogEntry {
+	entry := querylog.LogEntry{
+		Start:          start,
+		ClientIP:       defaultClientIP,
+		ClientNames:    []string{"none"},
+		BlockyInstance: r.instanceID,
+	}
+
+	for _, f := range r.cfg.Fields {
+		switch f {
+		case config.QueryLogFieldClientIP:
+			entry.ClientIP = request.ClientIP.String()
+
+		case config.QueryLogFieldClientName:
+			entry.ClientNames = request.ClientNames
+
+		case config.QueryLogFieldResponseReason:
+			entry.ResponseReason = response.Reason
+			entry.ResponseType = response.RType.String()
+			entry.ResponseCode = dns.RcodeToString[response.Res.Rcode]
+
+		case config.QueryLogFieldResponseAnswer:
+			entry.Answer = util.Obfuscate(util.AnswerToString(response.Res.Answer))
+
+		case config.QueryLogFieldQuestion:
+			entry.QuestionName = util.Obfuscate(request.Req.Question[0].Name)
+			entry.QuestionType = dns.TypeToString[request.Req.Question[0].Qtype]
+
+		case config.QueryLogFieldDuration:
+			entry.DurationMs = durationMs
+		}
+	}
+
+	if r.cfg.Type == config.QueryLogTypeDnstap {
+		var err error
+		entry.QueryWire, err = request.Req.Pack()
+		if err != nil {
+			log.PrefixedLog(queryLoggingResolverType).WithError(err).Warn("failed to pack query wire for dnstap")
+
+			return nil
+		}
+		entry.ResponseWire, err = response.Res.Pack()
+		if err != nil {
+			log.PrefixedLog(queryLoggingResolverType).WithError(err).Warn("failed to pack response wire for dnstap")
+
+			return nil
+		}
+		entry.QueryTime = request.RequestTS
+		entry.ResponseTime = start.Add(time.Duration(durationMs) * time.Millisecond)
+		entry.SocketProtocol = request.Protocol
+		entry.ClientIP = request.ClientIP.String()
+	}
+
+	return &entry
+}
+
+// write entry: if log directory is configured, write to log file
+func (r *QueryLoggingResolver) writeLog(ctx context.Context) {
+	ctx, logger := r.log(ctx)
+
+	for {
+		select {
+		case logEntry := <-r.logChan:
+			start := time.Now()
+
+			r.writer.Write(logEntry)
+
+			halfCap := cap(r.logChan) / 2
+
+			// if log channel is > 50% full, this could be a problem with slow writer (external storage over network etc.)
+			if len(r.logChan) > halfCap {
+				logger.
+					WithField("channel_len", len(r.logChan)).
+					Warnf("query log writer is too slow, write duration: %d ms", time.Since(start).Milliseconds())
+			}
+		case <-ctx.Done():
+			r.closeWriter()
+
+			return
+		}
+	}
+}
+
+// closeWriter lets writers that hold external resources (e.g. the dnstap socket)
+// flush and release them on shutdown. Writers without a Close — the DB/CSV/console
+// retention writers — are unaffected.
+func (r *QueryLoggingResolver) closeWriter() {
+	if c, ok := r.writer.(io.Closer); ok {
+		if err := c.Close(); err != nil {
+			log.PrefixedLog(queryLoggingResolverType).WithError(err).Warn("failed to close query log writer")
+		}
+	}
+}
+
+func readInstanceID(file string) (string, error) {
+	// Prefer /etc/hostname over os.Hostname to allow easy differentiation in a Docker Swarm
+	// See details in https://github.com/0xERR0R/blocky/pull/756
+	hn, fErr := os.ReadFile(file)
+	if fErr == nil {
+		return strings.TrimSpace(string(hn)), nil
+	}
+
+	hostname, osErr := os.Hostname()
+	if osErr == nil {
+		return hostname, nil
+	}
+
+	return "", fmt.Errorf("cannot determine instance ID: %w", errors.Join(fErr, osErr))
+}

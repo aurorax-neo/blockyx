@@ -1,0 +1,219 @@
+package querylog
+
+import (
+	"bufio"
+	"encoding/csv"
+	"errors"
+	"io"
+	"io/fs"
+	"os"
+	"time"
+
+	"github.com/0xERR0R/blocky/config"
+	"github.com/0xERR0R/blocky/helpertest"
+	"github.com/0xERR0R/blocky/log"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+var _ = Describe("FileWriter", func() {
+	var (
+		tmpDir *helpertest.TmpFolder
+		err    error
+		writer *FileWriter
+	)
+
+	JustBeforeEach(func() {
+		tmpDir = helpertest.NewTmpFolder("fileWriter")
+	})
+
+	Describe("CSV writer", func() {
+		When("target dir does not exist", func() {
+			It("should return error", func() {
+				_, err = NewCSVWriter("wrongdir", false, 0, config.QueryLogRotationDaily)
+				Expect(err).Should(HaveOccurred())
+			})
+		})
+		When("New log entry was created", func() {
+			It("should be logged in one file", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationDaily)
+
+				Expect(err).Should(Succeed())
+
+				By("entry for client 1", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client1"},
+						Start:       time.Now(),
+						DurationMs:  20,
+					})
+				})
+
+				By("entry for client 2", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client2"},
+						Start:       time.Now(),
+						DurationMs:  20,
+					})
+				})
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						time.Now().Format("2006-01-02") + "_ALL.log")))
+				}).Should(Equal(2))
+			})
+
+			It("should be logged in separate files per client", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, true, 0, config.QueryLogRotationDaily)
+
+				Expect(err).Should(Succeed())
+
+				By("entry for client 1", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client1"},
+						Start:       time.Now(),
+						DurationMs:  20,
+					})
+				})
+
+				By("entry for client 2", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client2"},
+						Start:       time.Now(),
+						DurationMs:  20,
+					})
+				})
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						time.Now().Format("2006-01-02") + "_client1.log")))
+				}).Should(Equal(1))
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						time.Now().Format("2006-01-02") + "_client2.log")))
+				}).Should(Equal(1))
+			})
+		})
+		When("rotation is hourly", func() {
+			It("should write one file per hour", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationHourly)
+
+				Expect(err).Should(Succeed())
+
+				now := time.Now()
+				writer.Write(&LogEntry{
+					ClientNames: []string{"client1"},
+					Start:       now,
+					DurationMs:  20,
+				})
+				writer.Write(&LogEntry{
+					ClientNames: []string{"client1"},
+					Start:       now.Add(-2 * time.Hour),
+					DurationMs:  20,
+				})
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						now.Format("2006-01-02_15") + "_ALL.log")))
+				}).Should(Equal(1))
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						now.Add(-2 * time.Hour).Format("2006-01-02_15") + "_ALL.log")))
+				}).Should(Equal(1))
+			})
+		})
+		When("rotation is minutely", func() {
+			It("should write one file per minute", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, config.QueryLogRotationMinutely)
+
+				Expect(err).Should(Succeed())
+
+				now := time.Now()
+				writer.Write(&LogEntry{
+					ClientNames: []string{"client1"},
+					Start:       now,
+					DurationMs:  20,
+				})
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						now.Format("2006-01-02_15-04") + "_ALL.log")))
+				}).Should(Equal(1))
+			})
+		})
+		When("rotation is empty", func() {
+			It("should default to daily", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, false, 0, "")
+
+				Expect(err).Should(Succeed())
+
+				writer.Write(&LogEntry{
+					ClientNames: []string{"client1"},
+					Start:       time.Now(),
+					DurationMs:  20,
+				})
+
+				Eventually(func(g Gomega) int {
+					return len(readCsv(tmpDir.JoinPath(
+						time.Now().Format("2006-01-02") + "_ALL.log")))
+				}).Should(Equal(1))
+			})
+		})
+		When("Cleanup is called", func() {
+			It("should delete old files", func() {
+				writer, err = NewCSVWriter(tmpDir.Path, false, 1, config.QueryLogRotationDaily)
+
+				Expect(err).Should(Succeed())
+
+				By("entry today", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client1"},
+						Start:       time.Now(),
+						DurationMs:  20,
+					})
+				})
+				By("entry 2 days ago", func() {
+					writer.Write(&LogEntry{
+						ClientNames: []string{"client1"},
+						Start:       time.Now().AddDate(0, 0, -3),
+						DurationMs:  20,
+					})
+				})
+
+				Eventually(func(g Gomega) ([]fs.DirEntry, error) {
+					return os.ReadDir(tmpDir.Path)
+				}, "20s", "1s").Should(HaveLen(2))
+
+				writer.CleanUp()
+
+				Eventually(func(g Gomega) ([]fs.DirEntry, error) {
+					return os.ReadDir(tmpDir.Path)
+				}, "20s", "1s").Should(HaveLen(1))
+			})
+		})
+	})
+})
+
+func readCsv(file string) [][]string {
+	var result [][]string
+
+	csvFile, err := os.Open(file)
+	Expect(err).Should(Succeed())
+
+	reader := csv.NewReader(bufio.NewReader(csvFile))
+	reader.Comma = '\t'
+
+	for {
+		line, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			log.Log().Fatal("can't read line", err)
+		}
+
+		result = append(result, line)
+	}
+
+	return result
+}

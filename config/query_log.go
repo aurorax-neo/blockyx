@@ -1,0 +1,125 @@
+package config
+
+import (
+	"net/url"
+	"strings"
+
+	"github.com/0xERR0R/blocky/log"
+	"github.com/sirupsen/logrus"
+)
+
+// QueryLogRotation controls the time granularity of CSV query log files
+// (blockyx extension).
+type QueryLogRotation string
+
+const (
+	// QueryLogRotationDaily writes one log file per day: 2006-01-02_ALL.log.
+	QueryLogRotationDaily QueryLogRotation = "daily"
+	// QueryLogRotationHourly writes one log file per hour: 2006-01-02_15_ALL.log.
+	QueryLogRotationHourly QueryLogRotation = "hourly"
+	// QueryLogRotationMinutely writes one log file per minute: 2006-01-02_15-04_ALL.log.
+	QueryLogRotationMinutely QueryLogRotation = "minutely"
+)
+
+// QueryLog configuration for the query logging
+type QueryLog struct {
+	// Directory for CSV log files, file path for sqlite, or database URL for mysql/postgresql/timescale,
+	// or dnstap socket address (unix:/path, tcp://host:port, or bare /path for unix).
+	Target Secret `yaml:"target"`
+	// Log target type: mysql, postgresql, timescale, sqlite, csv, csv-client, console, dnstap, or none.
+	Type QueryLogType `yaml:"type"`
+	// Delete log entries older than this many days. 0 disables retention cleanup.
+	LogRetentionDays uint64 `yaml:"logRetentionDays"`
+	// Maximum number of attempts to create the query log writer on startup.
+	CreationAttempts int `default:"3" yaml:"creationAttempts"`
+	// Delay between query log writer creation attempts.
+	CreationCooldown Duration `default:"2s" yaml:"creationCooldown"`
+	// Which fields to include in log entries; defaults to all available fields.
+	Fields []QueryLogField `yaml:"fields"`
+	// Interval at which buffered log entries are flushed in bulk to the database or dnstap socket
+	// (used by the mysql, postgresql, timescale, sqlite and dnstap targets).
+	FlushInterval Duration `default:"30s" yaml:"flushInterval"`
+	// Time granularity of CSV query log files: daily, hourly, or minutely
+	// (blockyx extension). Only applies to the csv and csv-client types.
+	Rotation QueryLogRotation `yaml:"rotation"`
+	// Rules to suppress certain queries from being logged.
+	Ignore QueryLogIgnore `yaml:"ignore"`
+}
+
+type QueryLogIgnore struct {
+	// If true, queries resolved as Special Use Domain Names (SUDN) are not logged.
+	SUDN bool `default:"false" yaml:"sudn"`
+	// Domains whose queries are not logged. Each entry is matched against the
+	// query name as an exact domain, a *.wildcard, or a /regex/.
+	Domains []string `yaml:"domains"`
+}
+
+// SetDefaults implements `defaults.Setter`.
+func (c *QueryLog) SetDefaults() {
+	// Since the default depends on the enum values, set it dynamically
+	// to avoid having to repeat the values in the annotation.
+	c.Fields = QueryLogFieldValues()
+
+	if c.Rotation == "" {
+		c.Rotation = QueryLogRotationDaily
+	}
+}
+
+// IsEnabled implements `config.Configurable`.
+func (c *QueryLog) IsEnabled() bool {
+	return c.Type != QueryLogTypeNone
+}
+
+// LogConfig implements `config.Configurable`.
+func (c *QueryLog) LogConfig(logger *logrus.Entry) {
+	logger.Infof("type: %s", c.Type)
+
+	if c.Target != "" {
+		logger.Infof("target: %s", c.censoredTarget())
+	}
+
+	logger.Infof("logRetentionDays: %d", c.LogRetentionDays)
+	logger.Debugf("creationAttempts: %d", c.CreationAttempts)
+	logger.Debugf("creationCooldown: %s", c.CreationCooldown)
+	logger.Infof("flushInterval: %s", c.FlushInterval)
+	logger.Infof("fields: %s", c.Fields)
+	logger.Infof("rotation: %s", c.Rotation)
+
+	logger.Infof("ignore:")
+	log.WithIndent(logger, "  ", func(e *logrus.Entry) {
+		e.Infof("sudn: %t", c.Ignore.SUDN)
+
+		if len(c.Ignore.Domains) > 0 {
+			e.Infof("domains (%d):", len(c.Ignore.Domains))
+			log.WithIndent(e, "  ", func(e *logrus.Entry) {
+				for _, d := range c.Ignore.Domains {
+					e.Debugf("- %s", d)
+				}
+			})
+		}
+	})
+}
+
+func (c *QueryLog) censoredTarget() string {
+	target := c.Target.Reveal()
+
+	// Make sure there's a scheme, otherwise the user is parsed as the scheme
+	targetStr := target
+	if !strings.Contains(targetStr, "://") {
+		targetStr = c.Type.String() + "://" + targetStr
+	}
+
+	parsed, err := url.Parse(targetStr)
+	if err != nil {
+		// The target couldn't be parsed, so we can't locate and redact an embedded
+		// password. Redact the whole value rather than risk leaking a secret.
+		return secretObfuscator
+	}
+
+	pass, ok := parsed.User.Password()
+	if !ok {
+		return target
+	}
+
+	return strings.ReplaceAll(target, pass, secretObfuscator)
+}
