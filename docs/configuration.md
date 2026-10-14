@@ -1127,6 +1127,39 @@ list and cache gauges. Disabled by default; when disabled,
       enable: true
     ```
 
+### Statistics persistence (blockyx extension)
+
+By default the statistics above live only in memory: a restart resets every
+dashboard card to zero. When `statistics.persistence` is enabled, closed hourly
+buckets are written to a SQLite database, the open bucket is flushed every
+`flushInterval` (and once more on shutdown), and the last 24h of buckets are
+reloaded on startup — the dashboard survives restarts.
+
+| Parameter                           | Mandatory | Default value | Description                                                     |
+| ----------------------------------- | --------- | ------------- | --------------------------------------------------------------- |
+| statistics.persistence.enable       | no        | false         | If true, persists hourly statistics buckets to SQLite          |
+| statistics.persistence.path         | yes*      |               | Filesystem path of the SQLite database file (*required when enabled) |
+| statistics.persistence.retentionDays| no        | 30            | Buckets older than this are deleted from the database          |
+| statistics.persistence.flushInterval| no        | 5m            | How often the open (partial) hour bucket is flushed            |
+
+!!! example
+
+    ```yaml
+    statistics:
+      enable: true
+      persistence:
+        enable: true
+        path: /data/blockyx-stats.db
+        retentionDays: 30
+        flushInterval: 5m
+    ```
+
+!!! note
+
+    The "Queries over time" chart and Top Lists for 7d/30d ranges are computed
+    from the query log, not from `/api/stats` — configure `queryLog` (csv or a
+    database target) for those to cover long ranges.
+
 !!! note
 
     Clients are identified by their resolved name (see [client name lookup](#client-name-lookup)) and fall

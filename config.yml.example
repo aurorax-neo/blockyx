@@ -11,6 +11,12 @@ upstreams:
 # Without this, the UI statistics show "statistics are disabled".
 statistics:
   enable: true
+  # 统计持久化（blockyx）：每小时桶写入 sqlite，重启后仪表盘数据不丢失
+  persistence:
+    enable: true
+    path: /data/blockyx-stats.db
+    retentionDays: 30
+    flushInterval: 5m
 
 # Query log with configurable file granularity (blockyx extension):
 # daily    -> 2006-01-02_ALL.log

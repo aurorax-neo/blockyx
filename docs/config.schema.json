@@ -811,6 +811,43 @@
           "type": "boolean",
           "description": "If true, enables in-memory statistics collection and the /api/stats endpoint.",
           "default": false
+        },
+        "persistence": {
+          "properties": {
+            "enable": {
+              "type": "boolean",
+              "description": "If true, enables statistics persistence.",
+              "default": false
+            },
+            "path": {
+              "type": "string",
+              "description": "Filesystem path of the SQLite database file."
+            },
+            "retentionDays": {
+              "type": "integer",
+              "description": "Hourly buckets older than this are deleted from the database.",
+              "default": 30
+            },
+            "flushInterval": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "description": "How often the currently open (partial) hour bucket is flushed to the database.",
+              "default": "5m",
+              "examples": [
+                "30s",
+                "1h"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "description": "Persistence config (blockyx extension)."
         }
       },
       "additionalProperties": false,

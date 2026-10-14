@@ -6,7 +6,7 @@
  * TL;DR - This is where all the tRPC server stuff is created and plugged in. The pieces you will
  * need to use are documented accordingly near the end.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError, z } from "zod";
 import {
@@ -14,6 +14,11 @@ import {
   type DemoService,
   getDemoConfigurationFromHeaders,
 } from "~/demo/config";
+import {
+  isLoginRequired,
+  resolveApiKey,
+  sessionKeyFromCookieHeader,
+} from "~/server/auth";
 import { createBlockyServers } from "~/server/blocky/servers";
 import { getConfiguration } from "~/server/config";
 import { getDemoScenario } from "~/server/demo";
@@ -43,10 +48,23 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
     : undefined;
   const configuration = scenario?.configuration ?? configured;
 
+  // blockyx: when blocky requires an API key, every tRPC call needs a login
+  // session (the login page itself only uses the /api/auth/* REST routes).
+  if (!configuration.demoMode && (await isLoginRequired(configuration))) {
+    const sessionKey = sessionKeyFromCookieHeader(opts.headers.get("cookie"));
+
+    if (!sessionKey) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Login required." });
+    }
+  }
+
   return {
     configuration,
     logs: scenario?.logs ?? (await getLogCoordinator()),
-    servers: createBlockyServers(configuration),
+    servers: createBlockyServers(
+      configuration,
+      resolveApiKey(configuration, opts.headers.get("cookie")),
+    ),
     isDemoServiceAvailable,
     ...opts,
   };

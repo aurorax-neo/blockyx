@@ -33,8 +33,8 @@ LABEL org.opencontainers.image.description="blockyx: blocky DNS server with web 
 RUN apk add --no-cache nodejs ca-certificates \
   && addgroup --system --gid 1001 blockyx \
   && adduser --system --uid 1001 --ingroup blockyx blockyx \
-  && mkdir -p /etc/blockyx /logs \
-  && chown blockyx:blockyx /etc/blockyx /logs
+  && mkdir -p /etc/blockyx /logs /data \
+  && chown blockyx:blockyx /etc/blockyx /logs /data
 
 COPY --from=go-builder /blockyx ./blockyx
 COPY --from=webui-builder /build/webui/.next/standalone ./

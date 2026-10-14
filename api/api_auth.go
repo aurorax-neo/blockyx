@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	apiKeyHeader   = "X-API-Key"
-	bearerPrefix   = "Bearer "
-	authRealmBody  = `{"error":"missing or invalid API key"}`
+	apiKeyHeader  = "X-API-Key"
+	bearerPrefix  = "Bearer "
+	authRealmBody = `{"error":"missing or invalid API key"}`
 )
 
 // APIKeyAuthMiddleware requires API key authentication for every request passing

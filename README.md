@@ -20,7 +20,13 @@ blockyx = **blocky**（Go 写的 DNS 代理/广告拦截）+ **blocky-ui**（Nex
    - `hourly` → `2006-01-02_15_ALL.log`，`minutely` → `2006-01-02_15-04_ALL.log`。
    - 文件名仍以 `2006-01-02` 开头，retention 清理逻辑不受影响；
      blocky-ui 的 CSV 读取器无需改动即可识别。
-3. **UI 修复**（`webui/src/components/dashboard/statistics/stat-card.tsx`）
+3. **统计持久化**（Go，`stats/store.go`）
+   - `statistics.persistence`：每小时统计桶写入 SQLite，
+     重启后仪表盘（Total Queries / Query Outcomes / Cache Hit Rate 等）不归零。
+   - 关闭的整点桶在 rollover 时落盘；当前未写满的桶每 `flushInterval`
+    （默认 5m）刷一次，退出时再刷一次；启动时恢复最近 24h。
+   - `retentionDays`（默认 30）控制库里保留多久。
+4. **UI 修复**（`webui/src/components/dashboard/statistics/stat-card.tsx`）
    - "Query Outcomes" 卡片：数字变大时红色百分比徽章不再溢出卡片，
      空间不足时自动换行（`flex-wrap`）。
 
@@ -40,12 +46,14 @@ docker run -d --name blockyx --restart unless-stopped \
   -p 3000:3000 -p 4000:4000 \
   -v ./config.yml:/etc/blockyx/config.yml:ro \
   -v blockyx-logs:/logs \
+  -v blockyx-data:/data \
   -e BLOCKYX_API_KEY="your-secret-key" \
   blockyx
 ```
 
 - Web UI：`http://<host>:3000`
 - HTTP API：`http://<host>:4000`（需 apikey，见下）
+- `/data` 卷存放统计数据库（仪表盘数据持久化），不挂卷则重启后统计归零。
 - 未设置 `BLOCKYX_API_KEY` 且配置文件里也没有 `api.apiKey` 时，
   容器启动会生成一个随机 key 并打印到日志（`docker logs blockyx` 查看）。
 
@@ -89,6 +97,27 @@ curl -H "Authorization: Bearer your-secret-key" http://<host>:4000/api/blocking/
   `/metrics`（prometheus，按配置）和 DNS 端口不受影响。
 - Web UI 容器内部通过 `127.0.0.1:4000` 直连，key 由 entrypoint 自动注入，
   无需手动配置。
+
+### Web UI 登录
+
+打开 `http://<host>:3000` 会先到登录页，输入上面那个**统一的 API key**
+（`api.apiKey` / `BLOCKYX_API_KEY`，docker 部署时从 `docker logs` 里找）
+即可进入仪表盘：
+
+- key 在服务端用 blocky 本体校验，通过后写入 HTTP-only 会话 cookie（30 天）。
+- 之后 UI 服务端每次代理 blocky 请求都带上该 key；会话 key 优先于环境变量。
+- blocky 没配 key（开放模式）时，登录页自动跳过，直进仪表盘。
+- 右上角可登出。
+
+### 统计持久化
+
+`statistics.persistence.enable: true` 后，仪表盘的统计数据（Total Queries、
+Query Outcomes、Cache Hit Rate 等）写入 SQLite，重启不再归零：
+
+- 整点桶在小时 rollover 时落盘；当前未写满的桶每 `flushInterval`（默认 5m）
+  刷一次，正常退出时再刷一次（`kill -9` 场景最多丢 `flushInterval` 的数据）。
+- 启动时恢复最近 24h，`/api/stats` 无缝继续。
+- `retentionDays`（默认 30）控制库里保留多久；库文件建议挂卷（如 `/data`）。
 
 ### 日志细粒度
 

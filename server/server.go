@@ -188,6 +188,15 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		return nil, queryError
 	}
 
+	// Flush the statistics buckets synchronously on shutdown so the dashboard
+	// data is persisted even though the consumer goroutine stops asynchronously.
+	// Only registered when persistence is enabled, so a disabled subsystem
+	// holds no resources.
+	closers := redisClosers
+	if sr, err := resolver.GetFromChainWithType[*resolver.StatsResolver](queryResolver); err == nil && sr.Closeable() {
+		closers = append([]io.Closer{sr}, closers...)
+	}
+
 	server = &Server{
 		dnsServers:       dnsServers,
 		queryResolver:    queryResolver,
@@ -195,7 +204,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		servers:          make(map[net.Listener]*httpServer),
 		http3PacketConns: http3PacketConns,
 		redisCancel:      redisCancel,
-		closers:          redisClosers,
+		closers:          closers,
 	}
 
 	server.printConfiguration()

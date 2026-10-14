@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xERR0R/blocky/log"
 	"github.com/0xERR0R/blocky/model"
 )
 
@@ -130,6 +131,8 @@ type Collector struct {
 	cacheEntries int
 	lists        ListCounts
 	now          func() time.Time
+	// store persists closed hourly buckets (blockyx extension); nil disables persistence.
+	store *Store
 }
 
 // NewCollector returns a Collector using the wall clock.
@@ -137,15 +140,41 @@ func NewCollector() *Collector {
 	return newCollectorWithClock(time.Now)
 }
 
+// NewCollectorWithStore returns a Collector that persists closed hourly buckets
+// to store and rehydrates the last windowHours of buckets on creation, so the
+// /api/stats data survives restarts. A nil store behaves like NewCollector.
+func NewCollectorWithStore(store *Store) *Collector {
+	return newCollectorWithClockAndStore(time.Now, store)
+}
+
 func newCollectorWithClock(now func() time.Time) *Collector {
-	return &Collector{
+	return newCollectorWithClockAndStore(now, nil)
+}
+
+func newCollectorWithClockAndStore(now func() time.Time, store *Store) *Collector {
+	c := &Collector{
 		buckets: map[string]*bucket{},
 		// Normalize to UTC so every timestamp the API reports (start/end/perHour)
 		// is in a single zone, consistent with the UTC-keyed buckets.
 		startTime: now().UTC(),
 		lists:     ListCounts{Denylist: map[string]int{}, Allowlist: map[string]int{}},
 		now:       now,
+		store:     store,
 	}
+
+	if store != nil {
+		if buckets, err := store.LoadSince(now().Add(-windowHours * time.Hour)); err != nil {
+			log.Log().Errorf("can't rehydrate statistics from store: %s", err)
+		} else {
+			for _, b := range buckets {
+				c.buckets[b.hourStart.Format(hourLayout)] = b
+			}
+
+			log.Log().Infof("rehydrated %d statistics bucket(s) from store", len(buckets))
+		}
+	}
+
+	return c
 }
 
 // Record adds one sample. Safe for concurrent use.
@@ -208,6 +237,8 @@ func (c *Collector) currentBucket(now time.Time) *bucket {
 	if key != c.currentKey {
 		if old, ok := c.buckets[c.currentKey]; ok {
 			pruneBucket(old)
+			// Persist the just-closed bucket so its data survives restarts.
+			c.saveBucket(old)
 		}
 
 		c.currentKey = key
@@ -233,6 +264,28 @@ func (c *Collector) evict(now time.Time) {
 		if !b.hourStart.After(cutoff) {
 			delete(c.buckets, k)
 		}
+	}
+}
+
+// saveBucket persists one bucket. Callers must hold c.mu. A nil store is a no-op.
+func (c *Collector) saveBucket(b *bucket) {
+	if c.store == nil {
+		return
+	}
+
+	if err := c.store.SaveBucket(b); err != nil {
+		log.Log().Errorf("can't persist statistics bucket: %s", err)
+	}
+}
+
+// Flush persists the currently open bucket, so at most flushInterval of data is
+// lost on an unclean shutdown. Safe for concurrent use.
+func (c *Collector) Flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if b, ok := c.buckets[c.currentKey]; ok {
+		c.saveBucket(b)
 	}
 }
 

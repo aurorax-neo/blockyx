@@ -11,6 +11,7 @@ import (
 	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/evt"
 	"github.com/0xERR0R/blocky/lists"
+	"github.com/0xERR0R/blocky/log"
 	"github.com/0xERR0R/blocky/model"
 	"github.com/0xERR0R/blocky/stats"
 	"github.com/0xERR0R/blocky/util"
@@ -37,8 +38,10 @@ type StatsResolver struct {
 	NextResolver
 	typed
 
-	collector     *stats.Collector
-	samples       chan stats.Sample
+	collector *stats.Collector
+	samples   chan stats.Sample
+	store     *stats.Store
+
 	subscriptions []busSubscription
 	dropped       atomic.Uint64
 }
@@ -57,22 +60,75 @@ func NewStatsResolver(ctx context.Context, cfg config.Statistics) *StatsResolver
 		return r
 	}
 
-	r.collector = stats.NewCollector()
+	var store *stats.Store
+
+	if cfg.Persistence.Enable {
+		if cfg.Persistence.Path == "" {
+			log.Log().Fatal("statistics.persistence.path must be set when statistics.persistence.enable is true")
+		}
+
+		var err error
+
+		store, err = stats.OpenStore(cfg.Persistence.Path)
+		util.FatalOnError("can't open statistics database", err)
+
+		log.Log().Infof("statistics persistence enabled: %s", cfg.Persistence.Path)
+	}
+
+	r.collector = stats.NewCollectorWithStore(store)
+	r.store = store
 	r.samples = make(chan stats.Sample, statsChannelBuffer)
 
 	// Subscribe before starting the consumer so subscriptions is fully written
 	// before the goroutine that reads it on shutdown begins.
 	r.subscribeEvents()
 
-	go r.consume(ctx)
+	go r.consume(ctx, store, cfg)
 
 	return r
 }
 
+// Close flushes the open statistics bucket to the store and closes it.
+// It is called synchronously during server shutdown, so no data is lost in
+// the race between the consumer goroutine stopping and the process exiting.
+// Implements io.Closer; safe to call when statistics or persistence is disabled.
+func (r *StatsResolver) Close() error {
+	if r.collector == nil {
+		return nil
+	}
+
+	r.collector.Flush()
+
+	if r.store == nil {
+		return nil
+	}
+
+	return r.store.Close()
+}
+
+// Closeable reports whether Close would do any work (persistence enabled).
+func (r *StatsResolver) Closeable() bool {
+	return r.store != nil
+}
+
 // consume drains samples into the collector until ctx is cancelled, then
 // detaches the event-bus handlers so the resolver can be garbage-collected.
-func (r *StatsResolver) consume(ctx context.Context) {
+// When persistence is enabled, the open bucket is flushed periodically;
+// the final flush happens synchronously in Close during server shutdown.
+func (r *StatsResolver) consume(ctx context.Context, store *stats.Store, cfg config.Statistics) {
 	defer r.unsubscribeEvents()
+
+	var ticker *time.Ticker
+
+	if store != nil {
+		flushInterval := time.Duration(cfg.Persistence.FlushInterval)
+		if flushInterval <= 0 {
+			flushInterval = 5 * time.Minute
+		}
+
+		ticker = time.NewTicker(flushInterval)
+		defer ticker.Stop()
+	}
 
 	for {
 		select {
@@ -80,8 +136,27 @@ func (r *StatsResolver) consume(ctx context.Context) {
 			return
 		case s := <-r.samples:
 			r.collector.Record(s)
+		case <-tickerC(ticker):
+			r.collector.Flush()
+
+			retention := time.Duration(cfg.Persistence.RetentionDays) * 24 * time.Hour
+			if retention > 0 {
+				if err := store.DeleteBefore(time.Now().Add(-retention)); err != nil {
+					log.Log().Errorf("can't clean up old statistics buckets: %s", err)
+				}
+			}
 		}
 	}
+}
+
+// tickerC returns the ticker channel, or nil when persistence is disabled so
+// the select case stays dormant.
+func tickerC(t *time.Ticker) <-chan time.Time {
+	if t == nil {
+		return nil
+	}
+
+	return t.C
 }
 
 // subscribeEvents keeps the point-in-time list/cache gauges up to date from the
