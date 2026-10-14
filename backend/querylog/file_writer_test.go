@@ -174,6 +174,37 @@ var _ = Describe("FileWriter", func() {
 					return os.ReadDir(tmpDir.Path)
 				}, "20s", "1s").Should(HaveLen(1))
 			})
+
+			It("should remove only expired entries within a file", func() {
+				// retention 48h: entry from 3 days ago expires, entry from 1 day ago stays
+				writer, err = NewCSVWriter(tmpDir.Path, false, 48*time.Hour, 100*1024*1024)
+
+				Expect(err).Should(Succeed())
+
+				now := time.Now()
+				// Both entries land in files keyed by their own date; write them
+				// directly into one file to test per-entry filtering.
+				path := tmpDir.JoinPath(now.Format("2006-01-02") + "_ALL_001.log")
+				f, err := os.Create(path)
+				Expect(err).Should(Succeed())
+
+				w := csv.NewWriter(f)
+				w.Comma = '\t'
+
+				oldTs := now.AddDate(0, 0, -3).Format("2006-01-02 15:04:05")
+				freshTs := now.AddDate(0, 0, -1).Format("2006-01-02 15:04:05")
+
+				Expect(w.Write([]string{oldTs, "1.1.1.1", "c1", "20", "ok", "example.com.", "", "NOERROR", "RESOLVED", "A", ""})).Should(Succeed())
+				Expect(w.Write([]string{freshTs, "1.1.1.1", "c1", "20", "ok", "example.org.", "", "NOERROR", "RESOLVED", "A", ""})).Should(Succeed())
+				w.Flush()
+				Expect(f.Close()).Should(Succeed())
+
+				writer.CleanUp()
+
+				rows := readCsv(path)
+				Expect(rows).Should(HaveLen(1))
+				Expect(rows[0][5]).Should(Equal("example.org."))
+			})
 		})
 	})
 })

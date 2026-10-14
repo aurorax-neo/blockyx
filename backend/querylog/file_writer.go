@@ -171,8 +171,14 @@ func (d *FileWriter) Write(entry *LogEntry) {
 	}
 }
 
-// CleanUp deletes old log files
+// CleanUp deletes individual log entries older than the retention period.
+// Each CSV file is rewritten without the expired entries; files where all
+// entries expired are removed entirely.
 func (d *FileWriter) CleanUp() {
+	if d.retention <= 0 {
+		return
+	}
+
 	logger := log.PrefixedLog(loggerPrefixFileWriter)
 
 	logger.Trace("starting clean up")
@@ -181,25 +187,121 @@ func (d *FileWriter) CleanUp() {
 
 	util.LogOnErrorWithEntry(logger.WithField("target", d.target), "can't list log directory: ", err)
 
-	// search for log files, which names starts with date
-	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".log") && len(f.Name()) > 10 {
-			t, err := time.ParseInLocation("2006-01-02", f.Name()[:10], time.Local)
-			if err == nil {
-				age := time.Since(t)
-				if d.retention > 0 && age > d.retention {
-					logger.WithFields(logrus.Fields{
-						"file":      f.Name(),
-						"age":       age.String(),
-						"retention": d.retention.String(),
-					}).Info("existing log file is older than retention time and will be deleted")
+	cutoff := time.Now().Add(-d.retention)
 
-					err := os.Remove(filepath.Join(d.target, f.Name()))
-					util.LogOnErrorWithEntry(logger.WithField("file", f.Name()), "can't remove file: ", err)
-				}
-			}
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".log") {
+			continue
+		}
+
+		d.cleanupFile(logger, f.Name(), cutoff)
+	}
+}
+
+// cleanupFile removes expired entries from a single log file.
+func (d *FileWriter) cleanupFile(logger *logrus.Entry, name string, cutoff time.Time) {
+	path := filepath.Join(d.target, name)
+
+	file, err := os.Open(path)
+	if err != nil {
+		util.LogOnErrorWithEntry(logger.WithField("file", name), "can't open log file for cleanup: ", err)
+
+		return
+	}
+
+	reader := csv.NewReader(file)
+	reader.Comma = '\t'
+	reader.FieldsPerRecord = -1
+
+	var kept [][]string
+
+	expired := 0
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			util.LogOnErrorWithEntry(logger.WithField("file", name), "can't parse log file during cleanup: ", err)
+
+			break
+		}
+
+		entry := parseEntry(record)
+		if entry == nil {
+			// Keep unparseable lines rather than dropping data silently.
+			kept = append(kept, record)
+
+			continue
+		}
+
+		if entry.Time.Before(cutoff) {
+			expired++
+		} else {
+			kept = append(kept, record)
 		}
 	}
+
+	_ = file.Close()
+
+	if expired == 0 {
+		return
+	}
+
+	if len(kept) == 0 {
+		logger.WithFields(logrus.Fields{
+			"file":    name,
+			"expired": expired,
+		}).Info("all log entries expired, removing file")
+
+		if err := os.Remove(path); err != nil {
+			util.LogOnErrorWithEntry(logger.WithField("file", name), "can't remove log file: ", err)
+		}
+
+		return
+	}
+
+	// Rewrite the file with only the fresh entries, atomically.
+	tmp, err := os.CreateTemp(d.target, ".cleanup-*")
+	if err != nil {
+		util.LogOnErrorWithEntry(logger.WithField("file", name), "can't create temp file for cleanup: ", err)
+
+		return
+	}
+
+	tmpName := tmp.Name()
+
+	writer := csv.NewWriter(tmp)
+	writer.Comma = '\t'
+
+	writeErr := writer.WriteAll(kept)
+	writer.Flush()
+
+	closeErr := tmp.Close()
+
+	if writeErr != nil || closeErr != nil {
+		util.LogOnErrorWithEntry(logger.WithField("file", name), "can't rewrite log file during cleanup: ", writeErr)
+
+		_ = os.Remove(tmpName)
+
+		return
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		util.LogOnErrorWithEntry(logger.WithField("file", name), "can't replace log file after cleanup: ", err)
+
+		_ = os.Remove(tmpName)
+
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"file":    name,
+		"expired": expired,
+		"kept":    len(kept),
+	}).Info("removed expired log entries")
 }
 
 func createQueryLogRow(logEntry *LogEntry) []string {
