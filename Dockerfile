@@ -36,7 +36,7 @@ WORKDIR /app
 LABEL org.opencontainers.image.source="https://github.com/aurorax-neo/blockyx"
 LABEL org.opencontainers.image.description="blockyx: blocky DNS server with embedded web UI, API key auth and query logs"
 
-RUN apk add --no-cache ca-certificates su-exec \
+RUN apk add --no-cache ca-certificates su-exec libcap \
   && addgroup --system --gid 1001 blockyx \
   && adduser --system --uid 1001 --ingroup blockyx blockyx \
   && mkdir -p /etc/blockyx /logs /data
@@ -44,7 +44,11 @@ RUN apk add --no-cache ca-certificates su-exec \
 COPY --from=go-builder /blockyx ./blockyx
 COPY config.yml.example ./config.yml.example
 COPY entrypoint.sh ./entrypoint.sh
-RUN chmod +x entrypoint.sh
+# Allow non-root blockyx user to bind privileged ports (53) — conventional
+# Docker approach, works with --net=host too.
+RUN setcap 'cap_net_bind_service=+ep' ./blockyx \
+  && chmod +x entrypoint.sh \
+  && chown blockyx:blockyx ./blockyx ./entrypoint.sh
 
 EXPOSE 53/udp 53/tcp 4000
 

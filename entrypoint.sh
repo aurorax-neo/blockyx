@@ -17,11 +17,6 @@ if [ "$(id -u)" = "0" ]; then
     chown blockyx:blockyx "$CONFIG" 2>/dev/null || true
   fi
 
-  # BLOCKYX_RUN_AS_ROOT=1 keeps root (e.g. --net=host binding port 53).
-  if [ "${BLOCKYX_RUN_AS_ROOT:-}" = "1" ]; then
-    exec ./blockyx --config "$CONFIG"
-  fi
-
   exec su-exec blockyx:blockyx ./blockyx --config "$CONFIG"
 fi
 
