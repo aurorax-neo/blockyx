@@ -1,14 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { setApiKey, validateApiKey } from "~/lib/blocky-api";
 
-export function LoginForm() {
-  const router = useRouter();
+export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -20,29 +19,22 @@ export function LoginForm() {
       setPending(true);
 
       try {
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key }),
-        });
+        const ok = await validateApiKey(key);
 
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          setError(body?.error ?? "Login failed.");
+        if (!ok) {
+          setError("Invalid API key.");
           return;
         }
 
-        router.push("/");
-        router.refresh();
+        setApiKey(key);
+        onSuccess();
       } catch {
         setError("Unable to reach the server.");
       } finally {
         setPending(false);
       }
     },
-    [key, router],
+    [key, onSuccess],
   );
 
   const onKeyChange = useCallback(

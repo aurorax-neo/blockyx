@@ -1,105 +1,69 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useDashboardServers } from "~/components/dashboard/server-context";
-import { api, type RouterInputs, type RouterOutputs } from "~/trpc/react";
+import { createApiClient } from "~/lib/blocky-api";
+import { parseBlockyQueryResult } from "~/lib/blocky-query";
+import { BLOCKY_DNS_RECORD_TYPES } from "~/lib/constants";
 
-type Query = RouterInputs["servers"]["query"];
-type Results = RouterOutputs["servers"]["query"];
+export interface QueryInput {
+  query: string;
+  type: (typeof BLOCKY_DNS_RECORD_TYPES)[number];
+}
+
+export interface QueryResult {
+  serverId: string;
+  success: boolean;
+  data?: ReturnType<typeof parseBlockyQueryResult>;
+  error?: { message: string };
+}
 
 export function useServerQuery() {
-  const dashboard = useDashboardServers();
-  const mutation = api.servers.query.useMutation();
-  const notificationId = useId();
-  const generation = useRef(0);
-  const pending = useRef<boolean>(false);
-  const [results, setResults] = useState<Results>([]);
-  const [names, setNames] = useState<Record<string, string>>({});
+  const client = useMemo(() => createApiClient(), []);
+  const [results, setResults] = useState<QueryResult[]>([]);
+  const [isPending, setIsPending] = useState(false);
 
-  async function request(input: Query, current: number) {
-    if (pending.current || current !== generation.current) {
+  async function execute(input: QueryInput) {
+    if (isPending) {
       return;
     }
 
-    pending.current = true;
+    setIsPending(true);
+    setResults([]);
 
     try {
-      const next = await mutation.mutateAsync(input);
+      const raw = await client
+        .post("query", { json: { query: input.query, type: input.type } })
+        .json();
+      const data = parseBlockyQueryResult(raw);
 
-      setResults((previous) => {
-        const updated = new Map(
-          next.map((result) => [result.serverId, result]),
-        );
-
-        return previous.length
-          ? previous.map((result) => updated.get(result.serverId) ?? result)
-          : next;
-      });
-
-      const failed = next.filter((result) => !result.success);
-
-      if (failed.length) {
-        toast.error("Some DNS queries failed", {
-          id: notificationId,
-          description: `${input.query} (${input.type})`,
-          action: {
-            label: "Retry",
-            onClick: () => {
-              request(
-                {
-                  ...input,
-                  serverIds: failed.map((result) => result.serverId),
-                },
-                current,
-              );
-            },
-          },
-        });
-      }
+      setResults([{ serverId: "default", success: true, data }]);
     } catch (error) {
       toast.error("Query failed", {
-        id: notificationId,
         description: error instanceof Error ? error.message : undefined,
-        action: {
-          label: "Retry",
-          onClick: () => {
-            request(input, current);
+      });
+      setResults([
+        {
+          serverId: "default",
+          success: false,
+          error: {
+            message: error instanceof Error ? error.message : "Query failed",
           },
         },
-      });
+      ]);
     } finally {
-      pending.current = false;
+      setIsPending(false);
     }
-  }
-
-  function execute(input: Omit<Query, "serverIds">) {
-    if (pending.current) {
-      return;
-    }
-
-    generation.current += 1;
-    toast.dismiss(notificationId);
-    setResults([]);
-    setNames(
-      Object.fromEntries(
-        dashboard.servers.map((server) => [server.id, server.name]),
-      ),
-    );
-
-    request(
-      { ...input, serverIds: dashboard.selection.selected("query") },
-      generation.current,
-    );
   }
 
   return {
     execute,
     results,
-    names,
-    isPending: mutation.isPending,
-    pendingServerIds: mutation.isPending
-      ? (mutation.variables?.serverIds ?? [])
-      : [],
+    names: { default: "Blocky" } as Record<string, string>,
+    isPending,
+    pendingServerIds: isPending ? ["default"] : [],
   };
 }
+
+// Re-export for components that referenced the tRPC-era types.
+export type { QueryInput as ServerQueryInput };

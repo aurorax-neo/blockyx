@@ -17,3 +17,5 @@ coverage.html
 coverage.txt
 coverage/
 blocky
+web/ui-out/*
+!web/ui-out/.gitkeep

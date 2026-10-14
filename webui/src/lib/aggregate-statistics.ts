@@ -1,10 +1,8 @@
-import type { RouterOutputs } from "~/trpc/react";
-
-type StatisticsResult = RouterOutputs["servers"]["statistics"][number];
+import type { StatisticsResult } from "~/components/dashboard/server-context";
 
 export function aggregateStatisticsTraffic(results: StatisticsResult[]) {
   const available = results.flatMap((result) =>
-    result.success ? [result.data] : [],
+    result.success && result.data ? [result.data] : [],
   );
   if (!available.length) {
     return null;
@@ -45,7 +43,7 @@ export function aggregateStatisticsTraffic(results: StatisticsResult[]) {
 
 export function aggregateStatistics(results: StatisticsResult[]) {
   const available = results.flatMap((result) =>
-    result.success ? [result.data] : [],
+    result.success && result.data ? [result.data] : [],
   );
   if (!available.length) {
     return null;

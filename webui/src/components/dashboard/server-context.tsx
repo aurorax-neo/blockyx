@@ -1,16 +1,37 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { useServerSelection } from "~/hooks/use-server-selection";
-import type { RouterOutputs } from "~/trpc/react";
+import type { ServerSummary, StatusResult } from "~/lib/blocky-api";
+import type {
+  BlockyStatistics,
+  createStatisticsSnapshot,
+} from "~/lib/blocky-statistics";
+
+export type StatisticsSnapshot = ReturnType<typeof createStatisticsSnapshot> & {
+  summary: BlockyStatistics["summary"];
+  answered: number;
+};
+
+export interface StatisticsResult {
+  serverId: string;
+  success: boolean;
+  data?: StatisticsSnapshot;
+  error?: { kind: string; message: string };
+}
+
+/** Single-server selection shim (the merged binary manages itself). */
+export interface ServerSelection {
+  selected: (scope: string) => string[];
+  toggle: (scope: string) => (id: string) => void;
+}
 
 export interface DashboardServers {
-  servers: RouterOutputs["servers"]["list"];
-  selection: ReturnType<typeof useServerSelection>;
-  statuses: RouterOutputs["servers"]["blockingStatus"] | undefined;
+  servers: ServerSummary[];
+  selection: ServerSelection;
+  statuses: StatusResult[] | undefined;
   loading: boolean;
   statusUpdatedAt: number;
-  statistics: RouterOutputs["servers"]["statistics"] | undefined;
+  statistics: StatisticsResult[] | undefined;
   statisticsLoading: boolean;
   reportDiagnostics: (
     key: string,

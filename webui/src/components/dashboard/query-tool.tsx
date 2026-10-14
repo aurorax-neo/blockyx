@@ -22,15 +22,12 @@ import {
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { useServerQuery } from "~/hooks/use-server-query";
+import { parseBlockyQueryResult } from "~/lib/blocky-query";
 import { BLOCKY_DNS_RECORD_TYPES } from "~/lib/constants";
 import { cn } from "~/lib/utils";
-import type { RouterOutputs } from "~/trpc/react";
 
 type DNS_RECORD_TYPE = (typeof BLOCKY_DNS_RECORD_TYPES)[number];
-type QueryResult = Extract<
-  RouterOutputs["servers"]["query"][number],
-  { success: true }
->["data"];
+type QueryResult = ReturnType<typeof parseBlockyQueryResult>;
 
 function QueryResultCard({
   name,
@@ -75,7 +72,7 @@ function QueryResultPane({
   detail,
 }: QueryResult) {
   const occurrences = new Map<string, number>();
-  const keyedAnswers = answers.map((answer) => {
+  const keyedAnswers = answers.map((answer: string) => {
     const occurrence = occurrences.get(answer) ?? 0;
     occurrences.set(answer, occurrence + 1);
     return { answer, key: JSON.stringify([answer, occurrence]) };
@@ -124,7 +121,7 @@ function QueryResultPane({
             <p className="text-muted-foreground text-sm">No answer returned</p>
           ) : (
             <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-2">
-              {keyedAnswers.map(({ answer, key }, index) => (
+              {keyedAnswers.map(({ answer, key }: { answer: string; key: string }, index: number) => (
                 <div key={key} className="flex items-baseline gap-3">
                   <span className="font-mono text-muted-foreground text-xs">
                     {String(index + 1).padStart(2, "0")}
@@ -264,11 +261,11 @@ export function QueryTool({ controls }: { controls?: ReactNode }) {
                         serverQuery.names[result.serverId] ?? result.serverId
                       }
                     >
-                      {result.success ? (
+                      {result.success && result.data ? (
                         <QueryResultPane {...result.data} />
                       ) : (
                         <p className="px-5 py-5 text-destructive text-sm">
-                          {result.error.message}
+                          {result.error?.message ?? "Query failed"}
                         </p>
                       )}
                     </QueryResultCard>

@@ -8,7 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/ui/tooltip";
-import type { LogEntry } from "~/server/logs/types";
+import type { LogEntry } from "~/lib/querylog-types";
 
 export function QueryReasonBadge({
   entry,

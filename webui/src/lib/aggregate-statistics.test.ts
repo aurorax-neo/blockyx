@@ -3,9 +3,9 @@ import {
   aggregateStatistics,
   aggregateStatisticsTraffic,
 } from "~/lib/aggregate-statistics";
-import type { RouterOutputs } from "~/trpc/react";
+import type { StatisticsResult } from "~/components/dashboard/server-context";
 
-type Result = RouterOutputs["servers"]["statistics"][number];
+type Result = StatisticsResult;
 
 function result(
   serverId: string,

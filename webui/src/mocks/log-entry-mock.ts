@@ -3,7 +3,7 @@ import {
   BLOCKY_DNS_RECORD_TYPES,
   BLOCKY_RESPONSE_TYPES,
 } from "~/lib/constants";
-import type { LogEntry } from "~/server/logs/types";
+import type { LogEntry } from "~/lib/querylog-types";
 
 const faker = new Faker({ locale: en });
 

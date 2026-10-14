@@ -4,7 +4,9 @@ import { format } from "date-fns";
 import { BarChart3 } from "lucide-react";
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { useDashboardServers } from "~/components/dashboard/server-context";
+import { useQuery } from "@tanstack/react-query";
+import { createApiClient } from "~/lib/blocky-api";
+import { fetchLogOverTime } from "~/lib/querylog-api";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -20,10 +22,8 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "~/components/ui/chart";
-import { useLogDiagnostics } from "~/hooks/use-log-diagnostics";
 import type { TimeRange } from "~/lib/constants";
 import { cn } from "~/lib/utils";
-import { api } from "~/trpc/react";
 import {
   ActiveFilterChip,
   type ChartFilter,
@@ -218,20 +218,51 @@ export function QueriesOverTimeChart({
   onRangeChange,
 }: QueriesOverTimeChartProps) {
   const [filter, setFilter] = useState<ChartFilter>(null);
+  const client = useMemo(() => createApiClient(), []);
 
-  const dashboard = useDashboardServers();
-  const options = {
-    range,
-    domain: filter?.type === "domain" ? filter.value : undefined,
-    client: filter?.type === "client" ? filter.value : undefined,
-  };
-  const connected = api.logs.queriesOverTime.useQuery({
-    ...options,
-    serverIds: dashboard.selection.selected("view"),
+  const { rangeMs, interval } = useMemo(() => {
+    switch (range) {
+      case "1h":
+        return { rangeMs: 3_600_000, interval: "5m" };
+      case "24h":
+        return { rangeMs: 86_400_000, interval: "1h" };
+      case "7d":
+        return { rangeMs: 7 * 86_400_000, interval: "6h" };
+      case "30d":
+        return { rangeMs: 30 * 86_400_000, interval: "24h" };
+    }
+  }, [range]);
+
+  const to = useMemo(() => new Date().toISOString(), [range]);
+  const from = useMemo(
+    () => new Date(Date.now() - rangeMs).toISOString(),
+    [rangeMs, to],
+  );
+
+  const connected = useQuery({
+    queryKey: [
+      "querylog",
+      "over-time",
+      range,
+      filter?.type,
+      filter?.value,
+      from,
+      to,
+    ],
+    queryFn: () =>
+      fetchLogOverTime(
+        client,
+        {
+          from,
+          to,
+          domain: filter?.type === "domain" ? filter.value : undefined,
+          client: filter?.type === "client" ? filter.value : undefined,
+        },
+        interval,
+      ),
   });
   const { isLoading, isPlaceholderData } = connected;
   const data = connected.data?.items;
-  useLogDiagnostics("chart", connected.data?.diagnostics);
   const showLoading = isLoading || isPlaceholderData;
 
   const clearFilter = useCallback(() => setFilter(null), []);

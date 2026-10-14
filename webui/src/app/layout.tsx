@@ -1,29 +1,13 @@
 import { Geist, Jersey_15 } from "next/font/google";
-import { Toaster } from "sonner";
-import { Pattern } from "~/components/dashboard/pattern";
-import { getConfiguration } from "~/server/config";
-import { TRPCReactProvider } from "~/trpc/react";
-
-import "../styles/globals.css";
-import { DemoModeProvider } from "~/components/dashboard/demo-mode";
+import { Providers } from "~/app/providers";
 import { cn } from "~/lib/utils";
 
-export async function generateMetadata() {
-  const { instanceName } = await getConfiguration();
+import "../styles/globals.css";
 
-  return {
-    title: instanceName ? `BlockyUI @ ${instanceName}` : "BlockyUI",
-    description: "A modern UI for Blocky DNS",
-    icons: {
-      icon: [
-        {
-          url: "/icon",
-          type: "image/png",
-        },
-      ],
-    },
-  };
-}
+export const metadata = {
+  title: "BlockyUI",
+  description: "A modern UI for Blocky DNS",
+};
 
 const geist = Geist({
   subsets: ["latin"],
@@ -38,26 +22,18 @@ const jersey15 = Jersey_15({
   variable: "--font-jersey15",
 });
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { demoMode } = await getConfiguration();
-
   return (
     <html
       className={cn(geist.variable, jersey15.variable, "dark", "font-sans")}
       lang="en"
     >
       <body>
-        {demoMode ? (
-          <DemoModeProvider>{children}</DemoModeProvider>
-        ) : (
-          <TRPCReactProvider>{children}</TRPCReactProvider>
-        )}
-        <Toaster />
-        <Pattern />
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

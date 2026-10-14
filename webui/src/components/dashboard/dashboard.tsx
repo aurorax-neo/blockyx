@@ -10,7 +10,6 @@ import { ChartsSection } from "~/components/dashboard/statistics/charts-section"
 import { StatisticsOverview } from "~/components/dashboard/statistics/statistics-overview";
 import { StatisticsTopLists } from "~/components/dashboard/statistics/statistics-top-lists";
 import { StatisticsTrafficChart } from "~/components/dashboard/statistics/statistics-traffic-chart";
-import { useDemoConfiguration } from "~/demo/context";
 
 export function Dashboard({
   showLogs,
@@ -25,8 +24,7 @@ export function Dashboard({
   maintenanceControls?: ReactNode;
   queryControls?: ReactNode;
 }) {
-  const configuration = useDemoConfiguration();
-  const showLogFeatures = showLogs && configuration.services.queryLogs;
+  const showLogFeatures = showLogs;
 
   return (
     <div className="space-y-5 sm:space-y-6">

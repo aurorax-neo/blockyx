@@ -1,7 +1,7 @@
 const reasonSuffixPattern = /\s*\(.*\)\s*$/;
 const reasonContextPattern = /\((.*)\)\s*$/;
 
-import type { LogEntry } from "~/server/logs/types";
+import type { LogEntry } from "~/lib/querylog-types";
 
 export function getQueryReason({
   reason,

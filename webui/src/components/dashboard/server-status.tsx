@@ -16,7 +16,7 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { useCountdown } from "~/hooks/use-countdown";
 import { useServerCommand } from "~/hooks/use-server-command";
-import { api } from "~/trpc/react";
+import { useQueryClient } from "@tanstack/react-query";
 
 const DURATION_PRESETS = [
   { label: "5 minutes", value: "5m", icon: Pause },
@@ -40,11 +40,13 @@ function blockingStatus(mixed: boolean, unavailable: number, enabled: number) {
 export function ServerStatus({ controls }: { controls?: ReactNode }) {
   const dashboard = useDashboardServers();
   const command = useServerCommand("blocking");
-  const utils = api.useUtils();
+  const queryClient = useQueryClient();
   const targets = dashboard.selection.selected("blocking");
   const known =
     dashboard.statuses?.flatMap((result) =>
-      targets.includes(result.serverId) && result.success ? [result.data] : [],
+      targets.includes(result.serverId) && result.success && result.data
+        ? [result.data]
+        : [],
     ) ?? [];
   const enabled = known.filter((status) => status.enabled).length;
   const disabled = known.length - enabled;
@@ -56,9 +58,9 @@ export function ServerStatus({ controls }: { controls?: ReactNode }) {
   );
   useEffect(() => {
     if (countdown === 0) {
-      utils.servers.blockingStatus.invalidate();
+      queryClient.invalidateQueries({ queryKey: ["blockingStatus"] });
     }
-  }, [countdown, utils]);
+  }, [countdown, queryClient]);
 
   const displayStatus = blockingStatus(mixed, unavailable, enabled);
   const showDisable = enabled > 0 || unavailable > 0;

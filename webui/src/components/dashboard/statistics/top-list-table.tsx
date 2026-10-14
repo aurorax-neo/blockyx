@@ -5,9 +5,7 @@ import { useCallback, useState } from "react";
 import { useDashboardServers } from "~/components/dashboard/server-context";
 import { useLogTopList } from "~/hooks/use-log-top-list";
 
-import { usePrefetchAdjacentPages } from "~/hooks/use-prefetch-adjacent-pages";
 import type { TimeRange } from "~/lib/constants";
-import { api } from "~/trpc/react";
 import { PaginatedTopList } from "./paginated-top-list";
 import type { TopListFilter } from "./top-list";
 
@@ -53,25 +51,8 @@ export function TopListTable({
     offset: page * limit,
     filter,
   });
-  const utils = api.useUtils();
   const totalPages = Math.ceil((query.data?.totalCount ?? 0) / limit);
   const config = TOP_LIST_CONFIG[type];
-
-  usePrefetchAdjacentPages({
-    enabled: !query.isFetching && query.data !== undefined,
-    currentPage: page,
-    totalPages,
-    prefetchPage: (targetPage) => {
-      utils.logs.topList.prefetch({
-        type,
-        range,
-        limit,
-        offset: targetPage * limit,
-        filter,
-        serverIds: dashboard.selection.selected("view"),
-      });
-    },
-  });
 
   const handleFilterChange = useCallback(
     (nextFilter: TopListFilter) => {

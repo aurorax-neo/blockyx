@@ -7,7 +7,7 @@ import {
   getQueryReason,
 } from "~/components/dashboard/query-logs/query-log-format";
 import { QueryReasonBadge } from "~/components/dashboard/query-logs/query-reason-badge";
-import type { LogEntry } from "~/server/logs/types";
+import type { LogEntry } from "~/lib/querylog-types";
 
 export function MobileQueryLog({
   entry,

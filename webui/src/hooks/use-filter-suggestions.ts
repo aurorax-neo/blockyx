@@ -1,9 +1,10 @@
-import { useDashboardServers } from "~/components/dashboard/server-context";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useDebounce } from "~/hooks/use-debounce";
-import { useLogDiagnostics } from "~/hooks/use-log-diagnostics";
 import { useLogTopList } from "~/hooks/use-log-top-list";
+import { createApiClient } from "~/lib/blocky-api";
 import type { TimeRange } from "~/lib/constants";
-import { api } from "~/trpc/react";
+import { searchLogNames } from "~/lib/querylog-api";
 
 export type FilterValue =
   | { type: "domain"; value: string }
@@ -26,14 +27,32 @@ export interface FilterSuggestions {
   isLoading: boolean;
 }
 
+function rangeToMs(range: TimeRange): number {
+  switch (range) {
+    case "1h":
+      return 3_600_000;
+    case "24h":
+      return 86_400_000;
+    case "7d":
+      return 7 * 86_400_000;
+    case "30d":
+      return 30 * 86_400_000;
+  }
+}
+
 export function useFilterSuggestions(
   search: string,
   range: TimeRange = "24h",
 ): FilterSuggestions {
-  const dashboard = useDashboardServers();
-  const serverIds = dashboard.selection.selected("view");
+  const client = useMemo(() => createApiClient(), []);
   const debouncedSearch = useDebounce(search, 300);
   const hasSearch = debouncedSearch.length > 0;
+
+  const to = useMemo(() => new Date().toISOString(), [range]);
+  const from = useMemo(
+    () => new Date(Date.now() - rangeToMs(range)).toISOString(),
+    [range, to],
+  );
 
   const { data: topDomains, isLoading: loadingTopDomains } = useLogTopList(
     { type: "domains", range, limit: 5, offset: 0, filter: "all" },
@@ -45,23 +64,18 @@ export function useFilterSuggestions(
     !hasSearch,
   );
 
-  const searched = api.logs.search.useQuery(
-    { serverIds, type: "domains", range, query: debouncedSearch, limit: 10 },
-    { enabled: hasSearch },
-  );
-  const searchedClient = api.logs.search.useQuery(
-    { serverIds, type: "clients", range, query: debouncedSearch, limit: 10 },
-    { enabled: hasSearch },
-  );
-
-  useLogDiagnostics(
-    "search-domains",
-    hasSearch ? searched.data?.diagnostics : undefined,
-  );
-  useLogDiagnostics(
-    "search-clients",
-    hasSearch ? searchedClient.data?.diagnostics : undefined,
-  );
+  const searched = useQuery({
+    queryKey: ["querylog", "search", "domains", debouncedSearch, from, to],
+    queryFn: () =>
+      searchLogNames(client, { from, to }, "domains", debouncedSearch),
+    enabled: hasSearch,
+  });
+  const searchedClient = useQuery({
+    queryKey: ["querylog", "search", "clients", debouncedSearch, from, to],
+    queryFn: () =>
+      searchLogNames(client, { from, to }, "clients", debouncedSearch),
+    enabled: hasSearch,
+  });
 
   const domains = hasSearch
     ? (searched.data?.items.map((item) => ({

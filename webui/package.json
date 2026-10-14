@@ -26,10 +26,7 @@
     "knip": "SKIP_ENV_VALIDATION=true knip",
     "checkdupe": "jscpd",
     "test": "vitest run",
-    "test:e2e": "bash scripts/e2e.sh",
-    "test:e2e:update": "bun run test:e2e --update-snapshots",
-    "test:watch": "vitest",
-    "log-data": "bunx tsx scripts/log-data/cli.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

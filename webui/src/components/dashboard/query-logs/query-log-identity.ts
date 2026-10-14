@@ -1,4 +1,4 @@
-import type { LogEntry } from "~/server/logs/types";
+import type { LogEntry } from "~/lib/querylog-types";
 
 export function identifyQueryLogRows<T extends LogEntry & { sourceId: string }>(
   entries: T[],

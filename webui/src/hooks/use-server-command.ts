@@ -1,121 +1,47 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useDashboardServers } from "~/components/dashboard/server-context";
-import { api, type RouterInputs } from "~/trpc/react";
+import { createApiClient } from "~/lib/blocky-api";
+import {
+  type commandSchema,
+  executeCommand,
+} from "~/lib/blocky-commands";
+import type { z } from "zod";
 
-type Command = RouterInputs["servers"]["command"]["command"];
+type Command = z.infer<typeof commandSchema>;
 
-export function useServerCommand(scope: "blocking" | "maintenance") {
-  const dashboard = useDashboardServers();
-  const utils = api.useUtils();
-  const mutation = api.servers.command.useMutation();
+export function useServerCommand(_scope: "blocking" | "maintenance") {
+  const queryClient = useQueryClient();
+  const client = useMemo(() => createApiClient(), []);
+  const [isPending, setIsPending] = useState(false);
 
-  async function execute(command: Command, targets?: string[]) {
-    const serverIds = targets ?? dashboard.selection.selected(scope);
+  async function execute(command: Command) {
+    if (isPending) {
+      return;
+    }
+
+    setIsPending(true);
+
     try {
-      const results = await mutation.mutateAsync({ serverIds, command });
-      const failed = results.filter((result) => !result.success);
-      const succeeded = results.length - failed.length;
-      const names = (ids: string[]) =>
-        dashboard.servers
-          .filter((server) => ids.includes(server.id))
-          .map((server) => server.name)
-          .join(", ");
-      notifyResults(command, failed, succeeded, names);
+      await executeCommand(client, command);
+      toast.success("Completed");
     } catch (error) {
       toast.error("Unable to complete the action", {
         description: error instanceof Error ? error.message : undefined,
       });
     } finally {
+      setIsPending(false);
       await Promise.all([
-        utils.servers.blockingStatus.invalidate(),
-        utils.servers.statistics.invalidate(),
+        queryClient.invalidateQueries({ queryKey: ["blockingStatus"] }),
+        queryClient.invalidateQueries({ queryKey: ["statistics"] }),
       ]);
     }
   }
 
-  function notifyResults(
-    command: Command,
-    failed: Awaited<ReturnType<typeof mutation.mutateAsync>>,
-    succeeded: number,
-    names: (ids: string[]) => string,
-  ) {
-    if (succeeded) {
-      toast.success(
-        `Completed on ${succeeded} ${succeeded === 1 ? "server" : "servers"}`,
-      );
-    }
-    if (failed.length) {
-      const uncertain = failed.some(
-        (result) => !result.success && result.error.kind === "timeout",
-      );
-      toast.error(
-        uncertain
-          ? "Some servers did not confirm the action"
-          : "Some actions failed",
-        {
-          description: [
-            names(failed.map((result) => result.serverId)),
-            command.action === "disable" && command.duration !== "0"
-              ? "Retrying restarts the blocking timer on these servers."
-              : undefined,
-          ]
-            .filter(Boolean)
-            .join(". "),
-          action: {
-            label: "Retry",
-            onClick: () => {
-              retry(
-                command,
-                failed.map((result) => result.serverId),
-              );
-            },
-          },
-        },
-      );
-    }
-  }
-
-  async function retry(command: Command, targets: string[]) {
-    if (command.action === "enable" || command.action === "disable") {
-      try {
-        const statuses = await utils.servers.blockingStatus.fetch(
-          { serverIds: targets },
-          { staleTime: 0 },
-        );
-        const pending = statuses
-          .filter((result) => {
-            if (!result.success) {
-              return true;
-            }
-            if (command.action === "enable") {
-              return !result.data.enabled;
-            }
-            return (
-              Boolean(command.groups) ||
-              command.duration !== "0" ||
-              result.data.enabled ||
-              Boolean(result.data.autoEnableInSec)
-            );
-          })
-          .map((result) => result.serverId);
-        if (!pending.length) {
-          toast.success("Blocking already matches on those servers");
-          return;
-        }
-        await execute(command, pending);
-        return;
-      } catch {
-        toast.error("Unable to check blocking status before retrying");
-        return;
-      }
-    }
-    await execute(command, targets);
-  }
-
   return {
     execute,
-    isPending: mutation.isPending,
+    isPending,
   };
 }

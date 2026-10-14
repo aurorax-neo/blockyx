@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"html/template"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
+	"strings"
 
 	"github.com/0xERR0R/blocky/metrics"
 	"github.com/0xERR0R/blocky/resolver"
@@ -197,6 +199,8 @@ func createHTTPRouter(cfg *config.Config, openAPIImpl api.StrictServerInterface)
 
 	api.RegisterOpenAPIEndpoints(router, openAPIImpl, cfg.API.APIKey.Reveal())
 
+	configureQueryLogHandler(router, cfg)
+
 	configureDebugHandler(router)
 
 	configureDocsHandler(router)
@@ -238,60 +242,76 @@ func configureRobotsHandler(router *chi.Mux) {
 	router.Handle("/robots.txt", http.FileServer(http.FS(web.WebFs)))
 }
 
-func configureRootHandler(cfg *config.Config, router *chi.Mux) {
-	router.Get("/", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set(contentTypeHeader, htmlContentType)
+func configureRootHandler(_ *config.Config, router *chi.Mux) {
+	uiFS, err := web.UI()
+	util.FatalOnError("unable to load embedded web UI", err)
 
-		t := template.New("index")
+	router.Get("/*", spaHandler(uiFS))
+}
 
-		_, _ = t.Parse(web.IndexTmpl)
+// spaHandler serves the embedded single-page UI. Exact files first,
+// then .html / index.html variants for client-side routes,
+// falling back to /index.html.
+// Note: http.FileServer is not used because it 301-redirects any path
+// ending in /index.html to ./ ; files are served via http.ServeContent.
+func spaHandler(uiFS fs.FS) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := "index.html"
 
-		type HandlerLink struct {
-			URL   string
-			Title string
+		if r.URL.Path != "/" {
+			clean := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+
+			for _, candidate := range []string{clean, clean + ".html", clean + "/index.html"} {
+				if ok := uiFileExists(uiFS, candidate); ok {
+					name = candidate
+
+					break
+				}
+			}
 		}
 
-		type PageData struct {
-			Links     []HandlerLink
-			Version   string
-			BuildTime string
-		}
+		serveUIFile(w, r, uiFS, name)
+	}
+}
 
-		pd := PageData{
-			Links:     nil,
-			Version:   util.Version,
-			BuildTime: util.BuildTime,
-		}
+func uiFileExists(uiFS fs.FS, name string) bool {
+	f, err := uiFS.Open(name)
+	if err != nil {
+		return false
+	}
 
-		pd.Links = []HandlerLink{
-			{
-				URL:   "/docs/openapi.yaml",
-				Title: "Rest API Documentation (OpenAPI)",
-			},
-			{
-				URL:   "/static/rapidoc.html",
-				Title: "Interactive Rest API Documentation (RapiDoc)",
-			},
-			{
-				URL:   "/docs/config.schema.json",
-				Title: "Configuration JSON Schema",
-			},
-			{
-				URL:   "/debug/",
-				Title: "Go Profiler",
-			},
-		}
+	defer f.Close()
 
-		if cfg.Prometheus.Enable {
-			pd.Links = append(pd.Links, HandlerLink{
-				URL:   cfg.Prometheus.Path,
-				Title: "Prometheus endpoint",
-			})
-		}
+	st, err := f.Stat()
 
-		err := t.Execute(writer, pd)
-		logAndResponseWithError(err, "can't write index template: ", writer)
-	})
+	return err == nil && !st.IsDir()
+}
+
+func serveUIFile(w http.ResponseWriter, r *http.Request, uiFS fs.FS, name string) {
+	f, err := uiFS.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil || st.IsDir() {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	rs, ok := f.(io.ReadSeeker)
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	http.ServeContent(w, r, st.Name(), st.ModTime(), rs)
 }
 
 func logAndResponseWithError(err error, message string, writer http.ResponseWriter) {

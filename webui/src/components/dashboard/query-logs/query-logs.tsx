@@ -1,14 +1,13 @@
 "use client";
 
 import { History, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { MobileQueryLog } from "~/components/dashboard/query-logs/mobile-query-log";
 import {
   identifyQueryLogRows,
   type QueryLogRow,
 } from "~/components/dashboard/query-logs/query-log-identity";
-import { useDashboardServers } from "~/components/dashboard/server-context";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -31,7 +30,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "~/components/ui/tooltip";
-import { useLogDiagnostics } from "~/hooks/use-log-diagnostics";
 import { usePrefetchAdjacentPages } from "~/hooks/use-prefetch-adjacent-pages";
 import {
   BLOCKY_DNS_RECORD_TYPES,
@@ -39,7 +37,13 @@ import {
   isDnsRecordType,
   isResponseType,
 } from "~/lib/constants";
-import { api } from "~/trpc/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createApiClient } from "~/lib/blocky-api";
+import {
+  fetchLogCount,
+  fetchLogRows,
+  type QueryLogFilters as ApiFilters,
+} from "~/lib/querylog-api";
 import { columns } from "./columns";
 import { DataTable } from "./data-table";
 import {
@@ -57,15 +61,8 @@ export function QueryLogs({
 }: {
   showServerColumn?: boolean;
 }) {
-  const dashboard = useDashboardServers();
-  const serverIds = dashboard.selection.selected("view");
-  const scopeKey = serverIds.join(",");
-  const [pageState, setPageState] = useState({ scopeKey, page: 0 });
-  const pageIndex = pageState.scopeKey === scopeKey ? pageState.page : 0;
-  const setPageIndex = useCallback(
-    (page: number) => setPageState({ scopeKey, page }),
-    [scopeKey],
-  );
+  const apiClient = useMemo(() => createApiClient(), []);
+  const [pageIndex, setPageIndex] = useState(0);
   const [filter, setFilter] = useState<QueryLogFilter>(null);
   const [responseTypeFilter, setResponseTypeFilter] = useState("ALL");
   const [questionTypeFilter, setQuestionTypeFilter] = useState("ALL");
@@ -105,45 +102,33 @@ export function QueryLogs({
   const questionType = isDnsRecordType(questionTypeFilter)
     ? questionTypeFilter
     : undefined;
-  const searchParams = {
+  const apiFilters: ApiFilters = {
     search,
     domain,
     client,
-    limit: pageSize,
-    offset: pageIndex * pageSize,
-    responseType,
-    questionType,
+    qtype: questionType,
+    rtype: responseType,
   };
-
-  const rows = api.logs.rows.useQuery(
-    { ...searchParams, limit: pageSize + 1, serverIds },
-    {
-      refetchOnWindowFocus: autoRefresh,
-      refetchInterval: autoRefresh ? 30_000 : false,
-    },
-  );
-  const count = api.logs.count.useQuery(
-    { search, domain, client, responseType, questionType, serverIds },
-    {
-      refetchOnWindowFocus: autoRefresh,
-      refetchInterval: autoRefresh ? 30_000 : false,
-    },
-  );
-  useLogDiagnostics("rows", rows.data?.diagnostics);
-  useLogDiagnostics("count", count.data?.diagnostics);
+  const rows = useQuery({
+    queryKey: ["querylog", "rows", apiFilters, pageSize, pageIndex],
+    queryFn: () =>
+      fetchLogRows(apiClient, apiFilters, pageSize + 1, pageIndex * pageSize),
+    refetchOnWindowFocus: autoRefresh,
+    refetchInterval: autoRefresh ? 30_000 : false,
+  });
+  const count = useQuery({
+    queryKey: ["querylog", "count", apiFilters],
+    queryFn: () => fetchLogCount(apiClient, apiFilters),
+    refetchOnWindowFocus: autoRefresh,
+    refetchInterval: autoRefresh ? 30_000 : false,
+  });
   const queryLogsData = rows.data && {
-    items: identifyQueryLogRows(rows.data.items.slice(0, pageSize)).map(
-      (item) => ({
-        ...item,
-        hostname:
-          dashboard.servers.find((server) => server.id === item.serverId)
-            ?.name ?? "Unknown",
-      }),
-    ),
-    totalCount:
-      rows.data.diagnostics.length || count.data?.diagnostics.length
-        ? undefined
-        : count.data?.totalCount,
+    items: identifyQueryLogRows(
+      rows.data.items
+        .slice(0, pageSize)
+        .map((item) => ({ ...item, sourceId: "default" })),
+    ).map((item) => ({ ...item, hostname: "Blocky" })),
+    totalCount: count.data?.total,
   };
   const {
     isFetching: isFetchingLogs,
@@ -183,18 +168,17 @@ export function QueryLogs({
       ? undefined
       : Math.ceil(queryLogsData.totalCount / pageSize);
   const showLogsLoading = isLoadingLogs || isPlaceholderLogs;
-  const utils = api.useUtils();
+  const queryClient = useQueryClient();
 
   usePrefetchAdjacentPages({
     enabled: !isFetchingLogs && queryLogsData !== undefined,
     currentPage: pageIndex,
     totalPages: pageCount ?? 0,
     prefetchPage: (targetPage) => {
-      utils.logs.rows.prefetch({
-        ...searchParams,
-        serverIds,
-        limit: pageSize + 1,
-        offset: targetPage * pageSize,
+      queryClient.prefetchQuery({
+        queryKey: ["querylog", "rows", apiFilters, pageSize, targetPage],
+        queryFn: () =>
+          fetchLogRows(apiClient, apiFilters, pageSize + 1, targetPage * pageSize),
       });
     },
   });

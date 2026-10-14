@@ -40,10 +40,10 @@ cp config.yml.example config.yml
 # 2. 构建
 docker build -t blockyx .
 
-# 3. 运行（DNS 53，Web UI 3000，HTTP API 4000）
+# 3. 运行（DNS 53，Web UI + HTTP API 共用 4000）
 docker run -d --name blockyx --restart unless-stopped \
   -p 53:53/udp -p 53:53/tcp \
-  -p 3000:3000 -p 4000:4000 \
+  -p 4000:4000 \
   -v ./config.yml:/etc/blockyx/config.yml:ro \
   -v blockyx-logs:/logs \
   -v blockyx-data:/data \
@@ -51,8 +51,8 @@ docker run -d --name blockyx --restart unless-stopped \
   blockyx
 ```
 
-- Web UI：`http://<host>:3000`
-- HTTP API：`http://<host>:4000`（需 apikey，见下）
+- Web UI + HTTP API：`http://<host>:4000`（同一个二进制，同一个端口；
+  UI 为静态页面，由 Go 二进制直接 serve，无需 Node 运行时）
 - `/data` 卷存放统计数据库（仪表盘数据持久化），不挂卷则重启后统计归零。
 - 未设置 `BLOCKYX_API_KEY` 且配置文件里也没有 `api.apiKey` 时，
   容器启动会生成一个随机 key 并打印到日志（`docker logs blockyx` 查看）。
@@ -93,25 +93,25 @@ curl -H "Authorization: Bearer your-secret-key" http://<host>:4000/api/blocking/
 
 注意：
 
-- 只保护 `/api/*`（含 `/api/stats`、`/api/blocking/*` 等）。
+- 只保护 `/api/*`（含 `/api/stats`、`/api/blocking/*`、`/api/querylog/*` 等）。
   `/metrics`（prometheus，按配置）和 DNS 端口不受影响。
 - **key 是强制的**：二进制在 `api.apiKey` 和 `BLOCKYX_API_KEY` 都为空时
   拒绝启动（`Error: refusing to start without an API key`）。docker 部署时
   entrypoint 会在两者都未设置时生成随机 key 并打印到 `docker logs`，
   所以容器永远不会无 key 运行。
-- Web UI 容器内部通过 `127.0.0.1:4000` 直连，key 由 entrypoint 自动注入，
-  无需手动配置。
+- Web UI 登录：浏览器打开 `http://<host>:4000`，输入**同一个 API key** 即可；
+  key 保存在浏览器 localStorage，每次请求经 `X-API-Key` 头直调本机 API。
 
 ### Web UI 登录
 
-打开 `http://<host>:3000` 会先到登录页，输入上面那个**统一的 API key**
+打开 `http://<host>:4000` 会先到登录页，输入上面那个**统一的 API key**
 （`api.apiKey` / `BLOCKYX_API_KEY`，docker 部署时从 `docker logs` 里找）
 即可进入仪表盘：
 
-- key 在服务端用 blocky 本体校验，通过后写入 HTTP-only 会话 cookie（30 天）。
-- 之后 UI 服务端每次代理 blocky 请求都带上该 key；会话 key 优先于环境变量。
-- blocky 没配 key（开放模式）时，登录页自动跳过，直进仪表盘。
-- 右上角可登出。
+- key 用 blocky 本体的 `/api/blocking/status` 校验，通过后存浏览器 localStorage。
+- 之后浏览器每次请求经 `X-API-Key` 头直调本机 `/api/*`（同源，无代理）。
+- 二进制强制要求 key，不存在开放模式。
+- 右上角可登出（清 localStorage）。
 
 ### 统计持久化
 
@@ -148,21 +148,32 @@ cd webui && bun install --frozen-lockfile && bun run build
 单测：
 
 ```bash
-go test ./api/... ./querylog/... ./config/...
-cd webui && bun run typecheck && bun run test src/lib/aggregate-statistics.test.ts
+go test ./api/... ./querylog/... ./config/... ./server/...
+cd webui && bun run typecheck && bun x vitest run
 ```
 
 ## 仓库结构
 
 ```
 blockyx/
-├── main.go  api/  config/  querylog/  resolver/  server/ ...  # Go：blocky（+ blockyx 改动）
-├── webui/                                                     # Next.js：blocky-ui（+ 徽章溢出修复）
-├── Dockerfile            # 单镜像：Go 二进制 + Web UI，一次打包
-├── entrypoint.sh         # 启动 blocky + web UI，注入 API key
+├── main.go  api/  config/  querylog/  resolver/  server/  web/ ...  # Go：blocky（+ blockyx 改动）
+├── webui/                # Next.js：blocky-ui（静态导出，打进 Go 二进制）
+├── web/ui-out/           # 构建产物（gitignored）：webui/out 拷入后 go:embed
+├── Dockerfile            # 单二进制镜像：UI 构建 → go:embed → 一个 Go 二进制
+├── entrypoint.sh         # 保证 API key 存在后 exec ./blockyx
 ├── config.yml.example
 └── .github/workflows/release.yml   # tag v* → 构建推送 ghcr.io/<owner>/blockyx
 ```
+
+## 架构说明
+
+`./blockyx` 是唯一的运行时二进制：
+
+- DNS（53/udp+tcp）、HTTP API（`:4000/api/*`）、Web UI（`:4000/`）同进程。
+- Web UI 是 Next.js 静态导出（`output: 'export'`），构建时经 `go:embed`
+  打进二进制；浏览器直调同源 `/api/*`，无需反向代理、无 CORS 问题。
+- API key 鉴权覆盖全部 `/api/*`（含新增的 `/api/querylog/*` 日志查询接口）。
+  UI 登录页用 key 调 `/api/blocking/status` 校验，通过后存浏览器 localStorage。
 
 ## 许可证
 

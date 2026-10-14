@@ -26,7 +26,7 @@ export function StatisticsOverview() {
   const isLoading = dashboard.statisticsLoading;
   const inventories =
     dashboard.statistics?.flatMap((result) =>
-      result.success
+      result.success && result.data
         ? [
             {
               id: result.serverId,

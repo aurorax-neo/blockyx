@@ -1,27 +1,36 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { LoginForm } from "~/app/login/login-form";
 import { ConnectedDashboard } from "~/components/dashboard/connected-dashboard";
 import { LogoutButton } from "~/components/dashboard/logout-button";
-import { DEFAULT_DEMO_CONFIGURATION, demoServers } from "~/demo/config";
-import { isLoginRequired, SESSION_COOKIE } from "~/server/auth";
-import { getConfiguration } from "~/server/config";
-import { serverSummaries } from "~/server/config/servers";
+import { clearApiKey, getApiKey } from "~/lib/blocky-api";
 
-export const dynamic = "force-dynamic";
+export default function HomePage() {
+  // undefined = not checked yet, null = no key stored
+  const [apiKey, setApiKey] = useState<string | null | undefined>(undefined);
 
-export default async function HomePage() {
-  const configuration = await getConfiguration();
+  useEffect(() => {
+    setApiKey(getApiKey());
+  }, []);
 
-  if (!configuration.demoMode && (await isLoginRequired(configuration))) {
-    const store = await cookies();
-    if (!store.get(SESSION_COOKIE)?.value) {
-      redirect("/login");
-    }
+  const onLogout = useCallback(() => {
+    clearApiKey();
+    setApiKey(null);
+  }, []);
+
+  if (apiKey === undefined) {
+    return null;
   }
 
-  const servers = configuration.demoMode
-    ? demoServers(DEFAULT_DEMO_CONFIGURATION.serverCount)
-    : serverSummaries(configuration);
+  if (apiKey === null) {
+    return (
+      <main className="container mx-auto flex min-h-svh max-w-md flex-col items-center justify-center px-4 py-8">
+        <h1 className="mb-8 font-bold font-title text-5xl">{"> "}BlockyUI</h1>
+        <LoginForm onSuccess={() => setApiKey(getApiKey())} />
+      </main>
+    );
+  }
 
   return (
     <main className="container mx-auto max-w-5xl px-4 py-8 sm:py-10">
@@ -29,10 +38,10 @@ export default async function HomePage() {
         <h1 className="font-bold font-title text-5xl sm:text-6xl">
           {"> "}BlockyUI
         </h1>
-        {configuration.demoMode ? null : <LogoutButton />}
+        <LogoutButton onLogout={onLogout} />
       </header>
 
-      <ConnectedDashboard servers={servers} demoMode={configuration.demoMode} />
+      <ConnectedDashboard apiKey={apiKey} />
     </main>
   );
 }
