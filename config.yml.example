@@ -23,9 +23,8 @@ statistics:
 #   -> 2006-01-02_ALL_001.log, 2006-01-02_ALL_002.log, ...
 # retention: how long to keep log files (e.g. 7d, 30d)
 queryLog:
-  type: csv
-  target: /logs
-  rotation: 100MB
+  type: sqlite
+  target: /data/querylog.db
   retention: 7d
 
 # API key authentication (blockyx extension). REQUIRED: the binary refuses

@@ -35,7 +35,7 @@ func (c *StatisticsPersistence) LogConfig(logger *logrus.Entry) {
 // Statistics contains the config for the in-memory statistics subsystem.
 type Statistics struct {
 	// If true, enables in-memory statistics collection and the /api/stats endpoint.
-	Enable bool `default:"false" yaml:"enable"`
+	Enable bool `default:"true" yaml:"enable"`
 	// Persistence config (blockyx extension).
 	Persistence StatisticsPersistence `yaml:"persistence"`
 }
