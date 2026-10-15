@@ -898,6 +898,64 @@ var _ = Describe("Running DNS server", func() {
 				Expect(srv.http3PacketConns).To(BeEmpty())
 			})
 		})
+
+		When("Ports isolation is enabled", func() {
+			It("serves management on http and DoH exclusively on https", func() {
+				cfg.Ports.DNS = config.ListenConfig{}
+				cfg.Ports.HTTP = config.ListenConfig{"127.0.0.1:0"}
+				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
+				cfg.Ports.Isolate = true
+
+				srv, err := NewServer(ctx, &cfg)
+				Expect(err).Should(Succeed())
+				DeferCleanup(func() { _ = srv.Stop(ctx) })
+
+				errCh := make(chan error, 10)
+				go srv.Start(ctx, errCh)
+
+				var httpAddr, httpsAddr string
+				Eventually(func() bool {
+					for l, s := range srv.servers {
+						if s.name == "http" {
+							httpAddr = l.Addr().String()
+						} else if s.name == "https" {
+							httpsAddr = l.Addr().String()
+						}
+					}
+					return httpAddr != "" && httpsAddr != ""
+				}, "2s", "10ms").Should(BeTrue())
+
+				httpClient := &http.Client{Timeout: 2 * time.Second}
+				httpsClient := &http.Client{
+					Timeout: 2 * time.Second,
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+					},
+				}
+
+				// 1. HTTP 专用管理端口：Web UI 存在 (返回 200)，DoH 端点被隔离 (返回 404)
+				respUI, err := httpClient.Get("http://" + httpAddr + "/")
+				Expect(err).Should(Succeed())
+				Expect(respUI.StatusCode).Should(Equal(http.StatusOK))
+				_ = respUI.Body.Close()
+
+				respDoHPostOnHTTP, err := httpClient.Post("http://"+httpAddr+"/dns-query", dnsContentType, bytes.NewReader([]byte{0}))
+				Expect(err).Should(Succeed())
+				Expect(respDoHPostOnHTTP.StatusCode).Should(Equal(http.StatusMethodNotAllowed))
+				_ = respDoHPostOnHTTP.Body.Close()
+
+				// 2. HTTPS 专用 DoH 端口：DoH 端点生效 (缺少参数返回 400)，Web UI/API 被隔离 (返回 404)
+				respDoH, err := httpsClient.Get("https://" + httpsAddr + "/dns-query")
+				Expect(err).Should(Succeed())
+				Expect(respDoH.StatusCode).Should(Equal(http.StatusBadRequest))
+				_ = respDoH.Body.Close()
+
+				respUIOnHTTPS, err := httpsClient.Get("https://" + httpsAddr + "/")
+				Expect(err).Should(Succeed())
+				Expect(respUIOnHTTPS.StatusCode).Should(Equal(http.StatusNotFound))
+				_ = respUIOnHTTPS.Body.Close()
+			})
+		})
 	})
 
 	Describe("Server start", Label("XX"), func() {

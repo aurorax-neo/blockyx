@@ -103,6 +103,7 @@ All values in this section are optional.
 | ports.http    | One or more [IP]:Port |               | Listen address for HTTP used for prometheus metrics, pprof, REST API, DoH... Example: `4000`, `:4000`, `192.168.0.1:4000`, `[4000, "[::1]:4000"]` |
 | ports.https   | One or more [IP]:Port |               | Listen address for HTTPS used for prometheus metrics, pprof, REST API, DoH... Example: `443`, `:443`, `192.168.0.1:443`, `[443, "[::1]:443"]`     |
 | ports.dohPath | string                | /dns-query    | URL path for DoH queries.                                                                                                                         |
+| ports.isolate | bool                  | false         | Enable dedicated port isolation: `ports.http` serves exclusively Web UI and API (DoH disabled on http); `ports.https` serves exclusively DoH (Web UI/API return 404 on https). |
 | ports.freeBind | bool                 | false         | Allow binding the DNS/DoT listeners to addresses not yet assigned to an interface (Linux only, via `IP_FREEBIND`; e.g. Tailscale/WireGuard/VRRP). No effect on wildcard binds; ignored with a warning on non-Linux. |
 | ports.proxyProtocol | list | _empty_ | TCP listener families (any of `dns`, `http`, `https`, `tls`) that must require a HAProxy PROXY protocol header. Enable only when the listener is reachable only through a trusted proxy. |
 

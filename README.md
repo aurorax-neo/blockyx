@@ -128,29 +128,36 @@ api:
  
  #### 1. 对外提供加密 DNS 服务（服务端 Inbound）
  
- | 协议 | 监听端口配置 | 依赖项 | 客户端使用方式 |
- | --- | --- | --- | --- |
- | **DoT** (DNS-over-TLS) | `ports.tls: 853` | 需配置 `certFile` 与 `keyFile` (默认自签) | Android 原生“私人 DNS”、iOS 描述文件、`kdig -d @host +tls` |
- | **DoH** (DNS-over-HTTPS) | `ports.https: 443` | 需配置 `certFile` 与 `keyFile` | 浏览器 (Chrome/Firefox/Edge)、`https://<host>:443/dns-query` |
- | **DoH3 / QUIC** (HTTP/3) | `http3.enable: true` | 需配置 `ports.https` (UDP 443 传输) | 现代支持 HTTP/3 QUIC 的 DoH 客户端，抗弱网丢包 |
+ blockyx 支持**端口功能严格隔离模式**（推荐安全部署）：将管理端（Web UI / REST API / 监控）与公共端（DoH 查询）彻底隔离开，避免在对外提供 DoH 解析时泄露管理界面。
  
- 配置示例：
+ | 协议 | 端口角色 | 监听配置项 | 端口特点与安全边界 | 客户端使用方式 |
+ | --- | --- | --- | --- | --- |
+ | **Web UI & API** | **专用管理端口** | `ports.http: 4000` | 仅提供 **Web UI**、**REST API**、**监控**，不处理 DoH | 局域网管理员访问后台、监控采集 |
+ | **DoH** (DNS-over-HTTPS) | **专用公共端口** | `ports.https: 443` | 仅响应 **/dns-query**，访问 UI 或 API 返回 404 | 浏览器、手机客户端，可放心映射公网 |
+ | **DoH3 / QUIC** (HTTP/3) | **专用公共端口** | `http3.enable: true` | 在 `ports.https` 相同的 UDP 端口启用 HTTP/3 | 现代支持 QUIC 的 DoH 客户端，抗弱网丢包 |
+ | **DoT** (DNS-over-TLS) | **专用公共端口** | `ports.tls: 853` | 独立原生 TCP-TLS 端口，纯 DNS-over-TLS 解析 | Android 原生“私人 DNS”、`kdig -d @host +tls` |
+ 
+ 配置示例（推荐的严格隔离模式）：
  
  ```yaml
  ports:
-   dns: 53                  # 普通 DNS
-   http: 4000               # Web UI 与 REST API
-   tls: 853                 # 开启 DoT 监听
-   https: 443               # 开启 DoH (以及 HTTPS Web UI)
-   dohPath: /dns-query      # DoH 查询路径
+   dns: 53                  # 普通 DNS (UDP/TCP)
+   http: 4000               # 专用管理端口 (Web UI + REST API + 监控)，建议仅内网访问
+   https: 443               # 专用 DoH 端口 (仅响应 /dns-query，可映射公网)
+   dohPath: /dns-query
+   isolate: true            # 开启严格功能隔离：443 绝不暴露 Web UI/API；4000 专用于后台
  
- certFile: /etc/blockyx/cert.pem
- keyFile: /etc/blockyx/key.pem
+   # 可选：开启专用 DoT 端口供 Android“私人DNS”直连
+   # tls: 853
  
- http3:
-   enable: true             # 在 UDP 443 开启 HTTP/3 (QUIC) DoH3 服务
+ # TLS 证书配置 (开启 ports.https 或 ports.tls 时使用)
+ # certFile: /etc/blockyx/cert.pem
+ # keyFile: /etc/blockyx/key.pem
+ 
+ # 可选：在 ports.https 的 UDP 端口开启基于 QUIC 的 HTTP/3 DoH3 服务
+ # http3:
+ #   enable: true
  ```
- 
  #### 2. 作为客户端请求上游解析（上游 Outbound）
  
  在 `upstreams.groups` 中支持以下格式：

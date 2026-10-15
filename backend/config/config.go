@@ -352,6 +352,10 @@ type Ports struct {
 	TLS ListenConfig `yaml:"tls"`
 	// URL path for DoH queries.
 	DOHPath string `default:"/dns-query" yaml:"dohPath"`
+	// Isolate separates ports.http and ports.https into dedicated roles:
+	// - ports.http serves ONLY Web UI, REST API, metrics, and docs (DoH is disabled on http).
+	// - ports.https serves ONLY DoH queries (Web UI, API, metrics, and docs are disabled on https).
+	Isolate bool `default:"false" yaml:"isolate"`
 	// Allow binding the DNS and DoT listeners to addresses that are not yet assigned to a network
 	// interface, via the Linux IP_FREEBIND socket option (e.g. for Tailscale/WireGuard/VRRP addresses
 	// brought up after startup). Has no effect on wildcard binds and is ignored, with a warning, on
@@ -376,6 +380,7 @@ func (c *Ports) LogConfig(logger *logrus.Entry) {
 	logger.Infof("HTTP     = %s", c.HTTP)
 	logger.Infof("HTTPS    = %s", c.HTTPS)
 	logger.Infof("DOHPath  = %s", c.DOHPath)
+	logger.Infof("Isolate  = %t", c.Isolate)
 	logger.Infof("FreeBind = %t", c.FreeBind)
 	logger.Infof("PROXY protocol = %s", c.ProxyProtocol)
 }

@@ -216,15 +216,33 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		return nil, fmt.Errorf("failed to create OpenAPI interface implementation: %w", err)
 	}
 
-	httpRouter := createHTTPRouter(cfg, openAPIImpl)
-	server.registerDoHEndpoints(httpRouter, cfg)
+	var httpHandler http.Handler
+	var httpsHandler http.Handler
+
+	if cfg.Ports.Isolate {
+		// Isolate mode:
+		// 1. ports.http serves ONLY Web UI, REST API, metrics, debug and docs (DoH is disabled on http).
+		uiRouter := createHTTPRouter(cfg, openAPIImpl)
+		httpHandler = uiRouter
+
+		// 2. ports.https serves ONLY DoH queries (Web UI, API, metrics, and docs are disabled on https).
+		dohRouter := chi.NewRouter()
+		server.registerDoHEndpoints(dohRouter, cfg)
+		httpsHandler = dohRouter
+	} else {
+		// Shared mode (legacy default): both listeners share the combined router.
+		combinedRouter := createHTTPRouter(cfg, openAPIImpl)
+		server.registerDoHEndpoints(combinedRouter, cfg)
+		httpHandler = combinedRouter
+		httpsHandler = combinedRouter
+	}
 
 	if len(http3PacketConns) > 0 {
-		server.http3Server = newHTTP3Server(httpRouter, newH3TLSConfig(tlsCfg))
+		server.http3Server = newHTTP3Server(httpsHandler, newH3TLSConfig(tlsCfg))
 	}
 
 	if len(cfg.Ports.HTTP) != 0 {
-		srv := newHTTPServer("http", httpRouter, cfg)
+		srv := newHTTPServer("http", httpHandler, cfg)
 
 		for _, l := range httpListeners {
 			server.servers[l] = srv
@@ -232,12 +250,12 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 	}
 
 	if len(cfg.Ports.HTTPS) != 0 {
-		var httpsHandler http.Handler = httpRouter
+		h := httpsHandler
 		if server.http3Server != nil {
-			httpsHandler = newAltSvcMiddleware(server.http3Server)(httpRouter)
+			h = newAltSvcMiddleware(server.http3Server)(httpsHandler)
 		}
 
-		srv := newHTTPServer("https", httpsHandler, cfg)
+		srv := newHTTPServer("https", h, cfg)
 
 		for _, l := range httpsListeners {
 			server.servers[l] = srv
