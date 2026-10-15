@@ -92,35 +92,38 @@ file in that folder (subfolders included) and merges them into one configuration
     connectIPVersion: v4
     ```
 
-## Ports & addresses configuration
+## Web & DNS listeners configuration
 
-All values in this section are optional.
+blockyx separates the management control plane (`web`) from the DNS data plane (`dns`):
 
 | Parameter     | Type                  | Default value | Description                                                                                                                                       |
 |---------------|-----------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| ports.dns     | One or more [IP]:Port | 53            | Listen address for DNS (TCP and UDP). Example: `53`, `:53`, `192.168.0.1:53`, `[53, "[::1]:53"]`                                                  |
-| ports.tls     | One or more [IP]:Port |               | Listen address for DoT (DNS-over-TLS). Example: `83`, `:853`, `192.168.0.1:853`, `[853, "[::1]:853"]`                                             |
-| ports.http    | One or more [IP]:Port |               | Listen address for HTTP used for prometheus metrics, pprof, REST API, DoH... Example: `4000`, `:4000`, `192.168.0.1:4000`, `[4000, "[::1]:4000"]` |
-| ports.https   | One or more [IP]:Port |               | Listen address for HTTPS used for prometheus metrics, pprof, REST API, DoH... Example: `443`, `:443`, `192.168.0.1:443`, `[443, "[::1]:443"]`     |
-| ports.dohPath | string                | /dns-query    | URL path for DoH queries.                                                                                                                         |
-| ports.isolate | bool                  | false         | Enable dedicated port isolation: `ports.http` serves exclusively Web UI and API (DoH disabled on http); `ports.https` serves exclusively DoH (Web UI/API return 404 on https). |
-| ports.freeBind | bool                 | false         | Allow binding the DNS/DoT listeners to addresses not yet assigned to an interface (Linux only, via `IP_FREEBIND`; e.g. Tailscale/WireGuard/VRRP). No effect on wildcard binds; ignored with a warning on non-Linux. |
-| ports.proxyProtocol | list | _empty_ | TCP listener families (any of `dns`, `http`, `https`, `tls`) that must require a HAProxy PROXY protocol header. Enable only when the listener is reachable only through a trusted proxy. |
+| web.port      | One or more [IP]:Port | 4000          | Dedicated listen address for Web UI, REST API, Prometheus metrics, and pprof debug endpoints.                                                    |
+| web.tls       | bool                  | false         | Enable HTTPS for the management interface (uses root certFile/keyFile).                                                                          |
+| dns.port      | One or more [IP]:Port | 53            | Listen address for standard DNS (TCP and UDP). Example: `53`, `:53`, `192.168.0.1:53`, `[53, "[::1]:53"]`                                         |
+| dns.dot       | One or more [IP]:Port |               | Dedicated listen address for DoT (DNS-over-TLS). Example: `853`, `:853`, `[853, "[::1]:853"]`                                                     |
+| dns.doh.port  | One or more [IP]:Port |               | Dedicated listen address for DoH (DNS-over-HTTPS). Web UI and API return 404 here.                                                               |
+| dns.doh.tls   | bool                  | false         | Set `false` for plain HTTP (reverse proxy TLS termination) or `true` for native TLS.                                                              |
+| dns.doh.h3    | bool                  | false         | Enable HTTP/3 (DoH3 / QUIC) on the same UDP port as `dns.doh.port`. Requires `dns.doh.tls: true`.                                                |
+| dns.doh.path  | string                | /dns-query    | URL path for DoH queries.                                                                                                                         |
+| dns.freeBind  | bool                  | false         | Allow binding the DNS/DoT listeners to addresses not yet assigned to an interface (Linux only, via `IP_FREEBIND`).                                 |
+| dns.proxyProtocol | list              | _empty_       | TCP listener families (`dns`, `http`, `https`, `tls`) that require a HAProxy PROXY protocol header.                                              |
 
 !!! example
 
     ```yaml
-    ports:
-      dns: 53
-      tls: [853, "[::1]:853"]
-      http:
-        - 80
-        - 4000
-      https: 443
-      dohPath: /my-custom-dns-query
-      proxyProtocol:
-        - https
-        - tls
+    web:
+      port: 4000
+      tls: false
+
+    dns:
+      port: 53
+      dot: 853
+      doh:
+        port: 443
+        h3: false
+        tls: false
+        path: /dns-query
     ```
 
 ## Logging configuration

@@ -6,97 +6,108 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("Ports.FreeBind", func() {
+var _ = Describe("DNSConfig.FreeBind", func() {
 	It("defaults to false", func() {
-		var ports Ports
-		Expect(defaults.Set(&ports)).Should(Succeed())
-		Expect(ports.FreeBind).Should(BeFalse())
+		var cfg Config
+		Expect(defaults.Set(&cfg)).Should(Succeed())
+		Expect(cfg.DNS.FreeBind).Should(BeFalse())
 	})
 })
 
-var _ = Describe("Ports.ProxyProtocol", func() {
+var _ = Describe("DNSConfig.ProxyProtocol", func() {
 	It("defaults to no PROXY protocol listeners", func() {
-		var ports Ports
-		Expect(defaults.Set(&ports)).Should(Succeed())
-		Expect(ports.ProxyProtocol).Should(BeEmpty())
-		Expect(ports.ProxyProtocol.Has(ProxyProtocolTypeDns)).Should(BeFalse())
+		var cfg Config
+		Expect(defaults.Set(&cfg)).Should(Succeed())
+		Expect(cfg.DNS.ProxyProtocol).Should(BeEmpty())
+		Expect(cfg.DNS.ProxyProtocol.Has(ProxyProtocolTypeDns)).Should(BeFalse())
 	})
 
 	It("reports the configured listener families via Has", func() {
-		ports := Ports{ProxyProtocol: ProxyProtocolListeners{ProxyProtocolTypeHttps, ProxyProtocolTypeTls}}
-		Expect(ports.ProxyProtocol.Has(ProxyProtocolTypeHttps)).Should(BeTrue())
-		Expect(ports.ProxyProtocol.Has(ProxyProtocolTypeTls)).Should(BeTrue())
-		Expect(ports.ProxyProtocol.Has(ProxyProtocolTypeDns)).Should(BeFalse())
-		Expect(ports.ProxyProtocol.Has(ProxyProtocolTypeHttp)).Should(BeFalse())
+		dns := DNSConfig{ProxyProtocol: ProxyProtocolListeners{ProxyProtocolTypeHttps, ProxyProtocolTypeTls}}
+		Expect(dns.ProxyProtocol.Has(ProxyProtocolTypeHttps)).Should(BeTrue())
+		Expect(dns.ProxyProtocol.Has(ProxyProtocolTypeTls)).Should(BeTrue())
+		Expect(dns.ProxyProtocol.Has(ProxyProtocolTypeDns)).Should(BeFalse())
+		Expect(dns.ProxyProtocol.Has(ProxyProtocolTypeHttp)).Should(BeFalse())
 	})
 
 	It("rejects duplicate listener families", func() {
-		ports := Ports{
-			DOHPath: "/dns-query",
+		dns := DNSConfig{
+			DOH: DOHConfig{Path: "/dns-query"},
 			ProxyProtocol: ProxyProtocolListeners{
 				ProxyProtocolTypeHttps,
 				ProxyProtocolTypeHttps,
 			},
 		}
 
-		Expect(ports.validate()).Should(MatchError(ContainSubstring(
-			`ports.proxyProtocol contains duplicate listener family "https"`)))
+		Expect(dns.validate()).Should(MatchError(ContainSubstring(
+			`dns.proxyProtocol contains duplicate listener family "https"`)))
 	})
 
 	It("rejects listener families without a configured port", func() {
-		ports := Ports{
-			DOHPath:       "/dns-query",
+		dns := DNSConfig{
+			DOH:           DOHConfig{Path: "/dns-query"},
 			ProxyProtocol: ProxyProtocolListeners{ProxyProtocolTypeTls},
 		}
 
-		Expect(ports.validate()).Should(MatchError(ContainSubstring(
-			`ports.proxyProtocol includes "tls" but ports.tls is empty`)))
+		Expect(dns.validate()).Should(MatchError(ContainSubstring(
+			`dns.proxyProtocol includes "tls" but corresponding port is empty`)))
 	})
 })
 
-var _ = Describe("Ports.PrivilegedPorts", func() {
+var _ = Describe("Config.PrivilegedPorts", func() {
 	It("returns privileged listen entries across DNS, HTTP, HTTPS and TLS", func() {
-		ports := Ports{
-			DNS:   ListenConfig{":53"},
-			HTTP:  ListenConfig{":4000"},
-			HTTPS: ListenConfig{"127.0.0.1:443"},
-			TLS:   ListenConfig{"[::1]:853"},
+		cfg := Config{
+			DNS: DNSConfig{
+				Port: ListenConfig{":53"},
+				DOT:  ListenConfig{"[::1]:853"},
+				DOH:  DOHConfig{Port: ListenConfig{"127.0.0.1:443"}},
+			},
+			Web: WebConfig{
+				Port: ListenConfig{":4000"},
+			},
 		}
 
-		Expect(ports.PrivilegedPorts()).Should(ConsistOf(":53", "127.0.0.1:443", "[::1]:853"))
+		Expect(cfg.PrivilegedPorts()).Should(ConsistOf(":53", "127.0.0.1:443", "[::1]:853"))
 	})
 
 	It("returns empty when every configured port is unprivileged", func() {
-		ports := Ports{DNS: ListenConfig{":1053"}, HTTP: ListenConfig{":4000"}}
+		cfg := Config{
+			DNS: DNSConfig{Port: ListenConfig{":1053"}},
+			Web: WebConfig{Port: ListenConfig{":4000"}},
+		}
 
-		Expect(ports.PrivilegedPorts()).Should(BeEmpty())
+		Expect(cfg.PrivilegedPorts()).Should(BeEmpty())
 	})
 
 	It("treats port 1023 as privileged and 1024 as unprivileged", func() {
-		ports := Ports{DNS: ListenConfig{":1023"}, HTTP: ListenConfig{":1024"}}
+		cfg := Config{
+			DNS: DNSConfig{Port: ListenConfig{":1023"}},
+			Web: WebConfig{Port: ListenConfig{":1024"}},
+		}
 
-		Expect(ports.PrivilegedPorts()).Should(ConsistOf(":1023"))
+		Expect(cfg.PrivilegedPorts()).Should(ConsistOf(":1023"))
 	})
 
 	It("handles a bare port without a colon (robustness; prefixPorts normalises these during unmarshal)", func() {
-		ports := Ports{DNS: ListenConfig{"53"}}
+		cfg := Config{DNS: DNSConfig{Port: ListenConfig{"53"}}}
 
-		Expect(ports.PrivilegedPorts()).Should(ConsistOf("53"))
+		Expect(cfg.PrivilegedPorts()).Should(ConsistOf("53"))
 	})
 
 	It("ignores empty and unparseable entries", func() {
-		ports := Ports{DNS: ListenConfig{"", "notaport"}}
+		cfg := Config{DNS: DNSConfig{Port: ListenConfig{"", "notaport"}}}
 
-		Expect(ports.PrivilegedPorts()).Should(BeEmpty())
+		Expect(cfg.PrivilegedPorts()).Should(BeEmpty())
 	})
-
 	It("does not treat port 0 (OS-assigned ephemeral) as privileged", func() {
-		ports := Ports{DNS: ListenConfig{":0"}, HTTP: ListenConfig{"127.0.0.1:0"}}
+		cfg := Config{
+			DNS: DNSConfig{Port: ListenConfig{":0"}},
+			Web: WebConfig{Port: ListenConfig{"127.0.0.1:0"}},
+		}
 
-		Expect(ports.PrivilegedPorts()).Should(BeEmpty())
+		Expect(cfg.PrivilegedPorts()).Should(BeEmpty())
 	})
 })
-
 var _ = Describe("extractPort", func() {
 	DescribeTable("parses the port from a listen address",
 		func(addr string, expectedPort uint16, expectedOK bool) {

@@ -52,9 +52,8 @@ filtering:
     - A
     - HTTPS
 
-ports:
-  # single comma-separated string form (ListenConfig.UnmarshalText)
-  dns: "53,5353"
+dns:
+  port: "53,5353"
 
 # single-string bootstrap form (docs uses the list/object forms)
 bootstrapDns: tcp+udp:1.1.1.1

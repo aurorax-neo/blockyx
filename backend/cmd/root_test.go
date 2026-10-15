@@ -109,8 +109,8 @@ var _ = Describe("root command", func() {
 				"  groups:",
 				"    default:",
 				"      - 1.1.1.1",
-				"ports:",
-				"  http:",
+				"web:",
+				"  port:",
 				"    - 127.0.0.1:8080",
 			)
 
@@ -127,8 +127,8 @@ var _ = Describe("root command", func() {
 				"  groups:",
 				"    default:",
 				"      - 1.1.1.1",
-				"ports:",
-				"  http:",
+				"web:",
+				"  port:",
 				"    - 127.0.0.1:invalid",
 			)
 

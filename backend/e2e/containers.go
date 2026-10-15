@@ -439,7 +439,7 @@ func checkBlockyReadiness(ctx context.Context, cfg *config.Config, container tes
 		return fmt.Errorf("can't perform the DNS healthcheck request: %w", err)
 	}
 
-	for _, httpPort := range cfg.Ports.HTTP {
+	for _, httpPort := range cfg.Ports.Web.HTTP {
 		parts := strings.Split(httpPort, ":")
 		port := parts[len(parts)-1]
 

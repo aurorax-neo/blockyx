@@ -30,11 +30,11 @@ import (
 )
 
 const (
-	httpBasePort  = 4000
-	dnsBasePort   = 5000
-	dnsBasePort2  = 55000
-	httpsBasePort = 6000
-	tlsBasePort   = 8000
+	httpBasePort = 4000
+	dnsBasePort  = 5000
+	dnsBasePort2 = 55000
+	dohBasePort  = 6000
+	tlsBasePort  = 8000
 )
 
 var (
@@ -49,7 +49,7 @@ var (
 var _ = BeforeSuite(func() {
 	mockClientName.Store("")
 	baseURL = fmt.Sprintf("http://%s/", GetHostPort("localhost", httpBasePort))
-	queryURL = baseURL + "dns-query"
+	queryURL = fmt.Sprintf("http://%s/dns-query", GetHostPort("localhost", dohBasePort))
 	var upstreamGoogle, upstreamFritzbox, upstreamClient config.Upstream
 	ctx, cancelFn := context.WithCancel(context.Background())
 	DeferCleanup(cancelFn)
@@ -152,12 +152,18 @@ var _ = BeforeSuite(func() {
 			Upstream: upstreamClient,
 		},
 
-		Ports: config.Ports{
-			DNS:     config.ListenConfig{GetHostPort("", dnsBasePort)},
-			TLS:     config.ListenConfig{GetHostPort("", tlsBasePort)},
-			HTTP:    config.ListenConfig{GetHostPort("", httpBasePort)},
-			HTTPS:   config.ListenConfig{GetHostPort("", httpsBasePort)},
-			DOHPath: "/dns-query",
+		DNS: config.DNSConfig{
+			Port: config.ListenConfig{GetHostPort("", dnsBasePort)},
+			DOT:  config.ListenConfig{GetHostPort("", tlsBasePort)},
+			DOH: config.DOHConfig{
+				Port: config.ListenConfig{GetHostPort("", dohBasePort)},
+				TLS:  false,
+				Path: "/dns-query",
+			},
+		},
+		Web: config.WebConfig{
+			Port: config.ListenConfig{GetHostPort("", httpBasePort)},
+			TLS:  false,
 		},
 		CertFile: certPem.Path,
 		KeyFile:  keyPem.Path,
@@ -603,9 +609,9 @@ var _ = Describe("Running DNS server", func() {
 
 	Describe("PROXY protocol", func() {
 		It("uses the PROXY source address for DoT requests", func() {
-			srv := newProxyProtocolTestServer(ctx, func(ports *config.Ports) {
-				ports.TLS = config.ListenConfig{"127.0.0.1:0"}
-				ports.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeTls}
+			srv := newProxyProtocolTestServer(ctx, func(c *config.Config) {
+				c.DNS.DOT = config.ListenConfig{"127.0.0.1:0"}
+				c.DNS.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeTls}
 			})
 			addr := srv.dnsServers[0].Listener.Addr().String()
 
@@ -639,9 +645,10 @@ var _ = Describe("Running DNS server", func() {
 		})
 
 		It("uses the PROXY source address for HTTPS DoH requests", func() {
-			srv := newProxyProtocolTestServer(ctx, func(ports *config.Ports) {
-				ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
-				ports.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttps}
+			srv := newProxyProtocolTestServer(ctx, func(c *config.Config) {
+				c.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				c.DNS.DOH.TLS = true
+				c.DNS.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttps}
 			})
 			addr := firstHTTPListenerAddr(srv)
 
@@ -681,9 +688,9 @@ var _ = Describe("Running DNS server", func() {
 		})
 
 		It("uses the PROXY source address for DNS-over-TCP requests", func() {
-			srv := newProxyProtocolTestServer(ctx, func(ports *config.Ports) {
-				ports.DNS = config.ListenConfig{"127.0.0.1:0"}
-				ports.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeDns}
+			srv := newProxyProtocolTestServer(ctx, func(c *config.Config) {
+				c.DNS.Port = config.ListenConfig{"127.0.0.1:0"}
+				c.DNS.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeDns}
 			})
 
 			var addr string
@@ -721,9 +728,10 @@ var _ = Describe("Running DNS server", func() {
 		})
 
 		It("uses the PROXY source address for HTTP DoH requests", func() {
-			srv := newProxyProtocolTestServer(ctx, func(ports *config.Ports) {
-				ports.HTTP = config.ListenConfig{"127.0.0.1:0"}
-				ports.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttp}
+			srv := newProxyProtocolTestServer(ctx, func(c *config.Config) {
+				c.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				c.DNS.DOH.TLS = false
+				c.DNS.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttp}
 			})
 			addr := firstHTTPListenerAddr(srv)
 
@@ -760,16 +768,21 @@ var _ = Describe("Running DNS server", func() {
 		})
 
 		It("keeps HTTPS working without PROXY protocol enabled", func() {
+			srv := newProxyProtocolTestServer(ctx, func(c *config.Config) {
+				c.Web.Port = config.ListenConfig{"127.0.0.1:0"}
+				c.Web.TLS = true
+			})
+			addr := firstHTTPListenerAddr(srv)
+
 			client := &http.Client{Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			}}
 
-			resp, err := client.Get(fmt.Sprintf("https://%s/docs/config.schema.json", GetHostPort("localhost", httpsBasePort)))
+			resp, err := client.Get(fmt.Sprintf("https://%s/docs/config.schema.json", addr))
 			Expect(err).Should(Succeed())
 			DeferCleanup(resp.Body.Close)
 			Expect(resp).Should(HaveHTTPStatus(http.StatusOK))
 		})
-	})
 
 	Describe("Server create", func() {
 		var (
@@ -808,8 +821,9 @@ var _ = Describe("Running DNS server", func() {
 			It("creates an http3Server and one packet conn per HTTPS address", func() {
 				// Clear the default DNS port so Stop has no never-started
 				// dns.Server to shut down.
-				cfg.Ports.DNS = config.ListenConfig{}
-				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0", "127.0.0.1:0"}
+				cfg.DNS.Port = config.ListenConfig{}
+				cfg.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0", "127.0.0.1:0"}
+				cfg.DNS.DOH.TLS = true
 				cfg.HTTP3.Enable = true
 
 				srv, err := NewServer(ctx, &cfg)
@@ -822,8 +836,9 @@ var _ = Describe("Running DNS server", func() {
 			})
 
 			It("does not leak spurious errors when Stop closes after Serve has started", func() {
-				cfg.Ports.DNS = config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)}
-				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.Port = config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)}
+				cfg.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.TLS = true
 				cfg.HTTP3.Enable = true
 
 				srv, err := NewServer(ctx, &cfg)
@@ -858,7 +873,7 @@ var _ = Describe("Running DNS server", func() {
 				Expect(srv.http3PacketConns).To(BeEmpty())
 
 				Expect(logHook.messages()).Should(ContainElement(
-					ContainSubstring("http3.enable is true but ports.https is empty")))
+					ContainSubstring("h3 is enabled but")))
 			})
 		})
 
@@ -866,10 +881,11 @@ var _ = Describe("Running DNS server", func() {
 			It("disables HTTP/3 and logs a warning", func() {
 				// Clear the default DNS port so Stop has no never-started
 				// dns.Server to shut down.
-				cfg.Ports.DNS = config.ListenConfig{}
-				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.Port = config.ListenConfig{}
+				cfg.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.TLS = true
 				cfg.HTTP3.Enable = true
-				cfg.Ports.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttps}
+				cfg.DNS.ProxyProtocol = config.ProxyProtocolListeners{config.ProxyProtocolTypeHttps}
 
 				logHook := installLogHook()
 				DeferCleanup(logHook.uninstall)
@@ -883,13 +899,14 @@ var _ = Describe("Running DNS server", func() {
 				Expect(srv.http3PacketConns).To(BeEmpty())
 
 				Expect(logHook.messages()).Should(ContainElement(
-					ContainSubstring("ports.proxyProtocol includes 'https'")))
+					ContainSubstring("dns.proxyProtocol includes 'https'")))
 			})
 		})
 
 		When("HTTP/3 is disabled", func() {
 			It("opens no UDP listeners even with HTTPS configured", func() {
-				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.TLS = true
 
 				srv, err := NewServer(ctx, &cfg)
 
@@ -901,10 +918,10 @@ var _ = Describe("Running DNS server", func() {
 
 		When("Ports isolation is enabled", func() {
 			It("serves management on http and DoH exclusively on https", func() {
-				cfg.Ports.DNS = config.ListenConfig{}
-				cfg.Ports.HTTP = config.ListenConfig{"127.0.0.1:0"}
-				cfg.Ports.HTTPS = config.ListenConfig{"127.0.0.1:0"}
-				cfg.Ports.Isolate = true
+				cfg.DNS.Port = config.ListenConfig{}
+				cfg.Web.Port = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.Port = config.ListenConfig{"127.0.0.1:0"}
+				cfg.DNS.DOH.TLS = true
 
 				srv, err := NewServer(ctx, &cfg)
 				Expect(err).Should(Succeed())
@@ -918,7 +935,7 @@ var _ = Describe("Running DNS server", func() {
 					for l, s := range srv.servers {
 						if s.name == "http" {
 							httpAddr = l.Addr().String()
-						} else if s.name == "https" {
+						} else if s.name == "doh-https" || s.name == "https" {
 							httpsAddr = l.Addr().String()
 						}
 					}
@@ -979,9 +996,9 @@ var _ = Describe("Running DNS server", func() {
 						},
 					},
 					Blocking: config.Blocking{BlockType: "zeroIp"},
-					Ports: config.Ports{
-						DNS:     config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
-						DOHPath: "/dns-query",
+					DNS: config.DNSConfig{
+						Port: config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DOH:  config.DOHConfig{Path: "/dns-query"},
 					},
 				})
 
@@ -1024,9 +1041,9 @@ var _ = Describe("Running DNS server", func() {
 						},
 					},
 					Blocking: config.Blocking{BlockType: "zeroIp"},
-					Ports: config.Ports{
-						DNS:     config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
-						DOHPath: "/dns-query",
+					DNS: config.DNSConfig{
+						Port: config.ListenConfig{GetHostPort("127.0.0.1", dnsBasePort2)},
+						DOH:  config.DOHConfig{Path: "/dns-query"},
 					},
 				})
 
@@ -1770,8 +1787,8 @@ var _ = Describe("Running DNS server", func() {
 		It("should create self-signed certificate if key/cert files are not provided", func() {
 			cfg.KeyFile = ""
 			cfg.CertFile = ""
-			cfg.Ports = config.Ports{
-				HTTPS: []string{":0"},
+			cfg.DNS = config.DNSConfig{
+				DOH: config.DOHConfig{Port: []string{":0"}, TLS: true},
 			}
 
 			sut, err := newTLSConfig(&cfg)
@@ -1802,6 +1819,7 @@ var _ = Describe("Running DNS server", func() {
 			Expect(w.writes).Should(BeZero())
 		})
 	})
+})
 })
 
 func requestServer(ctx context.Context, request *dns.Msg) *dns.Msg {
@@ -1840,20 +1858,19 @@ func requestServer(ctx context.Context, request *dns.Msg) *dns.Msg {
 	return nil
 }
 
-func newProxyProtocolTestServer(ctx context.Context, configurePorts func(*config.Ports)) *Server {
+func newProxyProtocolTestServer(ctx context.Context, configure func(*config.Config)) *Server {
 	cfg := config.Config{}
 	Expect(defaults.Set(&cfg)).Should(Succeed())
 	cfg.QueryLog.Type = config.QueryLogTypeConsole
 	cfg.Upstreams.Groups = map[string][]config.Upstream{
 		"default": {config.Upstream{Net: config.NetProtocolTcpUdp, Host: "1.1.1.1", Port: 53}},
 	}
-	cfg.Ports.DNS = config.ListenConfig{}
-	cfg.Ports.HTTP = config.ListenConfig{}
-	cfg.Ports.HTTPS = config.ListenConfig{}
-	cfg.Ports.TLS = config.ListenConfig{}
-	cfg.Ports.DOHPath = "/dns-query"
-	configurePorts(&cfg.Ports)
-
+	cfg.DNS.Port = config.ListenConfig{}
+	cfg.Web.Port = config.ListenConfig{}
+	cfg.DNS.DOH.Port = config.ListenConfig{}
+	cfg.DNS.DOT = config.ListenConfig{}
+	cfg.DNS.DOH.Path = "/dns-query"
+	configure(&cfg)
 	srv, err := NewServer(ctx, &cfg)
 	Expect(err).Should(Succeed())
 

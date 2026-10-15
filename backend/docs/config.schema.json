@@ -821,7 +821,7 @@
         "enable": {
           "type": "boolean",
           "description": "If true, enables in-memory statistics collection and the /api/stats endpoint.",
-          "default": false
+          "default": true
         },
         "persistence": {
           "properties": {
@@ -1022,9 +1022,9 @@
       "type": "object",
       "description": "Logging configuration."
     },
-    "ports": {
+    "web": {
       "properties": {
-        "dns": {
+        "port": {
           "anyOf": [
             {
               "type": "string"
@@ -1045,59 +1045,20 @@
               },
               "type": "array"
             }
-          ],
-          "description": "Listen address(es) for DNS over TCP and UDP (default: 53).",
-          "default": "53"
-        },
-        "http": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            },
-            {
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "integer"
-                  }
-                ]
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Listen address(es) for HTTP (metrics, REST API, DoH)."
-        },
-        "https": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            },
-            {
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "integer"
-                  }
-                ]
-              },
-              "type": "array"
-            }
-          ],
-          "description": "Listen address(es) for HTTPS (metrics, REST API, DoH)."
+          ]
         },
         "tls": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Dedicated Web UI \u0026 Management API configuration (control plane)."
+    },
+    "dns": {
+      "properties": {
+        "port": {
           "anyOf": [
             {
               "type": "string"
@@ -1119,16 +1080,74 @@
               "type": "array"
             }
           ],
-          "description": "Listen address(es) for DNS-over-TLS (DoT)."
+          "default": "53"
         },
-        "dohPath": {
-          "type": "string",
-          "description": "URL path for DoH queries.",
-          "default": "/dns-query"
+        "dot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "doh": {
+          "properties": {
+            "port": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "tls": {
+              "type": "boolean",
+              "default": false
+            },
+            "h3": {
+              "type": "boolean",
+              "default": false
+            },
+            "path": {
+              "type": "string",
+              "default": "/dns-query"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
         },
         "freeBind": {
           "type": "boolean",
-          "description": "Allow binding the DNS and DoT listeners to addresses that are not yet assigned to a network\ninterface, via the Linux IP_FREEBIND socket option (e.g. for Tailscale/WireGuard/VRRP addresses\nbrought up after startup). Has no effect on wildcard binds and is ignored, with a warning, on\nnon-Linux platforms.",
           "default": false
         },
         "proxyProtocol": {
@@ -1141,13 +1160,12 @@
               "tls"
             ]
           },
-          "type": "array",
-          "description": "PROXY protocol listener families. List the TCP listeners that sit behind a trusted proxy and\nmust require a PROXY protocol header before the connection is handled, e.g. [https, tls]."
+          "type": "array"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "Listen addresses for DNS, HTTP, HTTPS, and TLS."
+      "description": "Dedicated DNS listeners (UDP/TCP, DoT, DoH) (data plane)."
     },
     "minTlsServeVersion": {
       "anyOf": [
@@ -1705,8 +1723,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "description": "HTTP/3 (DoH3) server configuration."
+      "type": "object"
     },
     "rateLimit": {
       "properties": {
@@ -1745,7 +1762,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "Per-client DNS query rate limiting configuration."
+      "description": "HTTP3 is superseded by dns.doh.h3\nPer-client DNS query rate limiting configuration."
     },
     "rebindingProtection": {
       "properties": {

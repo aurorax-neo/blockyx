@@ -117,16 +117,16 @@ func newTLSConfig(cfg *config.Config) (*tls.Config, error) {
 //nolint:funlen
 func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err error) {
 	var tlsCfg *tls.Config
-
-	if len(cfg.Ports.HTTPS) > 0 || len(cfg.Ports.TLS) > 0 {
+	needsTLS := cfg.Web.TLS || len(cfg.DNS.DOT) > 0 || (cfg.DNS.DOH.TLS && len(cfg.DNS.DOH.Port) > 0)
+	if needsTLS {
 		tlsCfg, err = newTLSConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS configuration: %w", err)
 		}
 	}
 
-	if cfg.Ports.FreeBind && !freebind.Supported {
-		logger().Warn("ports.freeBind: true is only supported on Linux; " +
+	if cfg.DNS.FreeBind && !freebind.Supported {
+		logger().Warn("dns.freeBind: true is only supported on Linux; " +
 			"ignoring on this platform (binding normally)")
 	}
 
@@ -135,9 +135,9 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		return nil, fmt.Errorf("server creation failed: %w", err)
 	}
 
-	httpListeners, httpsListeners, http3PacketConns, err := createHTTPListeners(ctx, cfg, tlsCfg)
+	listeners, err := createHTTPAndDOHListeners(ctx, cfg, tlsCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP/HTTPS listeners: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP/DoH listeners: %w", err)
 	}
 
 	metrics.RegisterEventListeners()
@@ -202,7 +202,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		queryResolver:    queryResolver,
 		cfg:              cfg,
 		servers:          make(map[net.Listener]*httpServer),
-		http3PacketConns: http3PacketConns,
+		http3PacketConns: listeners.http3PacketConns,
 		redisCancel:      redisCancel,
 		closers:          closers,
 	}
@@ -216,48 +216,38 @@ func NewServer(ctx context.Context, cfg *config.Config) (server *Server, err err
 		return nil, fmt.Errorf("failed to create OpenAPI interface implementation: %w", err)
 	}
 
-	var httpHandler http.Handler
-	var httpsHandler http.Handler
-
-	if cfg.Ports.Isolate {
-		// Isolate mode:
-		// 1. ports.http serves ONLY Web UI, REST API, metrics, debug and docs (DoH is disabled on http).
+	// 1. Dedicated Web UI & Management API Server (ports.web)
+	if len(listeners.uiListeners) > 0 {
+		srvName := "http"
+		if listeners.uiTLS {
+			srvName = "https"
+		}
 		uiRouter := createHTTPRouter(cfg, openAPIImpl)
-		httpHandler = uiRouter
+		srv := newHTTPServer(srvName, uiRouter, cfg)
 
-		// 2. ports.https serves ONLY DoH queries (Web UI, API, metrics, and docs are disabled on https).
-		dohRouter := chi.NewRouter()
-		server.registerDoHEndpoints(dohRouter, cfg)
-		httpsHandler = dohRouter
-	} else {
-		// Shared mode (legacy default): both listeners share the combined router.
-		combinedRouter := createHTTPRouter(cfg, openAPIImpl)
-		server.registerDoHEndpoints(combinedRouter, cfg)
-		httpHandler = combinedRouter
-		httpsHandler = combinedRouter
-	}
-
-	if len(http3PacketConns) > 0 {
-		server.http3Server = newHTTP3Server(httpsHandler, newH3TLSConfig(tlsCfg))
-	}
-
-	if len(cfg.Ports.HTTP) != 0 {
-		srv := newHTTPServer("http", httpHandler, cfg)
-
-		for _, l := range httpListeners {
+		for _, l := range listeners.uiListeners {
 			server.servers[l] = srv
 		}
 	}
 
-	if len(cfg.Ports.HTTPS) != 0 {
-		h := httpsHandler
-		if server.http3Server != nil {
-			h = newAltSvcMiddleware(server.http3Server)(httpsHandler)
+	// 2. Dedicated DoH DNS Resolver Server (ports.dns.doh)
+	if len(listeners.dohListeners) > 0 {
+		dohRouter := chi.NewRouter()
+		server.registerDoHEndpoints(dohRouter, cfg)
+
+		var dohHandler http.Handler = dohRouter
+		if len(listeners.http3PacketConns) > 0 {
+			server.http3Server = newHTTP3Server(dohRouter, newH3TLSConfig(tlsCfg))
+			dohHandler = newAltSvcMiddleware(server.http3Server)(dohRouter)
 		}
 
-		srv := newHTTPServer("https", h, cfg)
+		srvName := "doh-http"
+		if listeners.dohTLS {
+			srvName = "doh-https"
+		}
+		srv := newHTTPServer(srvName, dohHandler, cfg)
 
-		for _, l := range httpsListeners {
+		for _, l := range listeners.dohListeners {
 			server.servers[l] = srv
 		}
 	}
@@ -270,8 +260,7 @@ func createServers(ctx context.Context, cfg *config.Config, tlsCfg *tls.Config) 
 
 	var err *multierror.Error
 
-	freeBind := cfg.Ports.FreeBind
-
+	freeBind := cfg.DNS.FreeBind
 	addServers := func(newServer NewServerFunc, addresses config.ListenConfig) error {
 		for _, address := range addresses {
 			server, err := newServer(address)
@@ -288,19 +277,19 @@ func createServers(ctx context.Context, cfg *config.Config, tlsCfg *tls.Config) 
 	err = multierror.Append(err,
 		addServers(func(address string) (*dns.Server, error) {
 			return createUDPServer(ctx, address, listenerOptions{freeBind: freeBind})
-		}, cfg.Ports.DNS),
+		}, cfg.DNS.Port),
 		addServers(func(address string) (*dns.Server, error) {
 			return createTCPServer(ctx, address, listenerOptions{
 				freeBind:      freeBind,
-				proxyProtocol: cfg.Ports.ProxyProtocol.Has(config.ProxyProtocolTypeDns),
+				proxyProtocol: cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeDns),
 			})
-		}, cfg.Ports.DNS),
+		}, cfg.DNS.Port),
 		addServers(func(address string) (*dns.Server, error) {
 			return createTLSServer(ctx, address, tlsCfg, listenerOptions{
 				freeBind:      freeBind,
-				proxyProtocol: cfg.Ports.ProxyProtocol.Has(config.ProxyProtocolTypeTls),
+				proxyProtocol: cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeTls),
 			})
-		}, cfg.Ports.TLS))
+		}, cfg.DNS.DOT))
 
 	if multiErr := err.ErrorOrNil(); multiErr != nil {
 		return nil, fmt.Errorf("failed to create DNS servers: %w", multiErr)
@@ -309,42 +298,75 @@ func createServers(ctx context.Context, cfg *config.Config, tlsCfg *tls.Config) 
 	return dnsServers, nil
 }
 
-func createHTTPListeners(
+type webDOHListeners struct {
+	uiListeners      []net.Listener
+	uiTLS            bool
+	dohListeners     []net.Listener
+	dohTLS           bool
+	http3PacketConns []net.PacketConn
+}
+
+func createHTTPAndDOHListeners(
 	ctx context.Context, cfg *config.Config, tlsCfg *tls.Config,
-) (httpListeners, httpsListeners []net.Listener, http3PacketConns []net.PacketConn, err error) {
-	httpListeners, err = newTCPListeners(ctx, "http", cfg.Ports.HTTP,
-		cfg.Ports.ProxyProtocol.Has(config.ProxyProtocolTypeHttp))
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create HTTP listeners: %w", err)
+) (*webDOHListeners, error) {
+	res := &webDOHListeners{
+		uiTLS:  cfg.Web.TLS,
+		dohTLS: cfg.DNS.DOH.TLS,
 	}
 
-	httpsListeners, err = newTLSListeners(ctx, "https", cfg.Ports.HTTPS, tlsCfg,
-		cfg.Ports.ProxyProtocol.Has(config.ProxyProtocolTypeHttps))
-	if err != nil {
-		closeAll(httpListeners)
-
-		return nil, nil, nil, fmt.Errorf("failed to create HTTPS listeners: %w", err)
+	// 1. Web UI / API listeners
+	if len(cfg.Web.Port) > 0 {
+		var err error
+		if cfg.Web.TLS {
+			res.uiListeners, err = newTLSListeners(ctx, "https", cfg.Web.Port, tlsCfg,
+				cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttp))
+		} else {
+			res.uiListeners, err = newTCPListeners(ctx, "http", cfg.Web.Port,
+				cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttp))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Web UI listener: %w", err)
+		}
 	}
 
-	if cfg.HTTP3.IsEnabled() {
+	// 2. DoH listeners
+	if len(cfg.DNS.DOH.Port) > 0 {
+		var err error
+		if cfg.DNS.DOH.TLS {
+			res.dohListeners, err = newTLSListeners(ctx, "https", cfg.DNS.DOH.Port, tlsCfg,
+				cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttps))
+		} else {
+			res.dohListeners, err = newTCPListeners(ctx, "http", cfg.DNS.DOH.Port,
+				cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttps) || cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttp))
+		}
+		if err != nil {
+			closeAll(res.uiListeners)
+
+			return nil, fmt.Errorf("failed to create DoH listener: %w", err)
+		}
+	}
+
+	h3Enabled := cfg.DNS.DOH.H3 || cfg.HTTP3.IsEnabled()
+	if h3Enabled {
 		switch {
-		case len(cfg.Ports.HTTPS) == 0:
-			logger().Warn("http3.enable is true but ports.https is empty; HTTP/3 disabled")
-		case cfg.Ports.ProxyProtocol.Has(config.ProxyProtocolTypeHttps):
-			logger().Warn("http3.enable is true but ports.proxyProtocol includes 'https'; " +
+		case len(cfg.DNS.DOH.Port) == 0 || !cfg.DNS.DOH.TLS:
+			logger().Warn("h3 is enabled but dns.doh is not configured with TLS; HTTP/3 disabled")
+		case cfg.DNS.ProxyProtocol.Has(config.ProxyProtocolTypeHttps):
+			logger().Warn("h3 is enabled but dns.proxyProtocol includes 'https'; " +
 				"HTTP/3 cannot carry PROXY protocol headers and is disabled to keep the client IP consistent")
 		default:
-			http3PacketConns, err = newUDPPacketConns(ctx, cfg.Ports.HTTPS)
+			var err error
+			res.http3PacketConns, err = newUDPPacketConns(ctx, cfg.DNS.DOH.Port)
 			if err != nil {
-				closeAll(httpListeners)
-				closeAll(httpsListeners)
+				closeAll(res.uiListeners)
+				closeAll(res.dohListeners)
 
-				return nil, nil, nil, fmt.Errorf("failed to create HTTP/3 UDP listeners: %w", err)
+				return nil, fmt.Errorf("failed to create HTTP/3 UDP listeners: %w", err)
 			}
 		}
 	}
 
-	return httpListeners, httpsListeners, http3PacketConns, nil
+	return res, nil
 }
 
 func closeAll[T io.Closer](closers []T) {
@@ -668,12 +690,10 @@ func (s *Server) printConfiguration() {
 	})
 
 	logger().Info("listeners:")
-	log.WithIndent(logger(), "  ", s.cfg.Ports.LogConfig)
-
-	if len(s.http3PacketConns) > 0 {
-		logger().Info("HTTP/3:")
-		log.WithIndent(logger(), "  ", s.cfg.HTTP3.LogConfig)
-	}
+	log.WithIndent(logger(), "  ", func(e *logrus.Entry) {
+		s.cfg.Web.LogConfig(e)
+		s.cfg.DNS.LogConfig(e)
+	})
 
 	logger().Info("runtime information:")
 

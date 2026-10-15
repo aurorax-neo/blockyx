@@ -210,10 +210,10 @@ func joinYAML(lines []string, newline string, trailing bool) []byte {
 	return []byte(out)
 }
 
-func warnMissingPrivilegedPortCapability(ports config.Ports) {
+func warnMissingPrivilegedPortCapability(cfg *config.Config) {
 	effective, err := raiseNetBindService()
 	if err != nil {
-		if privileged := ports.PrivilegedPorts(); len(privileged) > 0 {
+		if privileged := cfg.PrivilegedPorts(); len(privileged) > 0 {
 			log.Log().Warnf("could not adjust process capabilities (%v); binding "+
 				"privileged port(s) %s may fail — %s",
 				err, strings.Join(privileged, ", "), privilegedPortCapHint)
@@ -230,7 +230,7 @@ func warnMissingPrivilegedPortCapability(ports config.Ports) {
 		return
 	}
 
-	if privileged := ports.PrivilegedPorts(); len(privileged) > 0 {
+	if privileged := cfg.PrivilegedPorts(); len(privileged) > 0 {
 		log.Log().Warnf("configured to listen on privileged port(s) %s without "+
 			"CAP_NET_BIND_SERVICE; %s", strings.Join(privileged, ", "), privilegedPortCapHint)
 	}
@@ -272,7 +272,7 @@ func startServer(_ *cobra.Command, _ []string) error {
 
 	log.Configure(&cfg.Log)
 
-	warnMissingPrivilegedPortCapability(cfg.Ports)
+	warnMissingPrivilegedPortCapability(cfg)
 
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 

@@ -28,7 +28,7 @@ var _ = Describe("Optional Redis recovery", func() {
 		cfg = config.Config{}
 		Expect(defaults.Set(&cfg)).Should(Succeed())
 		cfg.QueryLog.Type = config.QueryLogTypeConsole
-		cfg.Ports.DNS = config.ListenConfig{}
+		cfg.DNS.Port = config.ListenConfig{}
 		cfg.Upstreams.Groups = map[string][]config.Upstream{
 			"default": {{Net: config.NetProtocolTcpUdp, Host: "127.0.0.1", Port: 53}},
 		}

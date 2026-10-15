@@ -34,7 +34,7 @@ var _ = Describe("schema-enriched config loading", func() {
   groups:
     default:
       - 1.1.1.1
-ports:
+dns:
   proxyProtocol:
     - dns
     - http
@@ -54,7 +54,7 @@ ports:
   groups:
     default:
       - 1.1.1.1
-ports:
+dns:
   proxyProtocol:
     - bogus
 `)

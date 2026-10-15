@@ -290,8 +290,10 @@ type Config struct {
 	Redis Redis `yaml:"redis"`
 	// Logging configuration.
 	Log log.Config `yaml:"log"`
-	// Listen addresses for DNS, HTTP, HTTPS, and TLS.
-	Ports Ports `yaml:"ports"`
+	// Dedicated Web UI & Management API configuration (control plane).
+	Web WebConfig `yaml:"web"`
+	// Dedicated DNS listeners (UDP/TCP, DoT, DoH) (data plane).
+	DNS DNSConfig `yaml:"dns"`
 	// Minimum TLS version the DoT and DoH servers use to serve encrypted DNS requests.
 	MinTLSServeVer TLSVersion `default:"1.2" yaml:"minTlsServeVersion"`
 	// Path to the TLS certificate file for DoH and DoT; if empty, a self-signed certificate is generated.
@@ -316,8 +318,8 @@ type Config struct {
 	DNS64 DNS64 `yaml:"dns64"`
 	// DNSSEC validation configuration.
 	DNSSEC DNSSEC `yaml:"dnssec"`
-	// HTTP/3 (DoH3) server configuration.
 	HTTP3 HTTP3 `yaml:"http3"`
+	// HTTP3 is superseded by dns.doh.h3
 	// Per-client DNS query rate limiting configuration.
 	RateLimit RateLimit `yaml:"rateLimit"`
 	// DNS rebinding protection configuration.
@@ -341,29 +343,106 @@ type Config struct {
 	} `yaml:",inline"`
 }
 
-type Ports struct {
-	// Listen address(es) for DNS over TCP and UDP (default: 53).
-	DNS ListenConfig `default:"53" yaml:"dns"`
-	// Listen address(es) for HTTP (metrics, REST API, DoH).
-	HTTP ListenConfig `yaml:"http"`
-	// Listen address(es) for HTTPS (metrics, REST API, DoH).
-	HTTPS ListenConfig `yaml:"https"`
-	// Listen address(es) for DNS-over-TLS (DoT).
-	TLS ListenConfig `yaml:"tls"`
-	// URL path for DoH queries.
-	DOHPath string `default:"/dns-query" yaml:"dohPath"`
-	// Isolate separates ports.http and ports.https into dedicated roles:
-	// - ports.http serves ONLY Web UI, REST API, metrics, and docs (DoH is disabled on http).
-	// - ports.https serves ONLY DoH queries (Web UI, API, metrics, and docs are disabled on https).
-	Isolate bool `default:"false" yaml:"isolate"`
-	// Allow binding the DNS and DoT listeners to addresses that are not yet assigned to a network
-	// interface, via the Linux IP_FREEBIND socket option (e.g. for Tailscale/WireGuard/VRRP addresses
-	// brought up after startup). Has no effect on wildcard binds and is ignored, with a warning, on
-	// non-Linux platforms.
-	FreeBind bool `default:"false" yaml:"freeBind"`
-	// PROXY protocol listener families. List the TCP listeners that sit behind a trusted proxy and
-	// must require a PROXY protocol header before the connection is handled, e.g. [https, tls].
+// WebConfig defines the management Web UI & API server configuration.
+type WebConfig struct {
+	Port ListenConfig `yaml:"port"`
+	TLS  bool         `default:"false" yaml:"tls"`
+}
+
+func (c *WebConfig) LogConfig(logger *logrus.Entry) {
+	logger.Infof("web.port = %s (tls=%t)", c.Port, c.TLS)
+}
+
+// DOHConfig defines the dedicated DNS-over-HTTPS server configuration.
+type DOHConfig struct {
+	Port ListenConfig `yaml:"port"`
+	TLS  bool         `default:"false" yaml:"tls"`
+	H3   bool         `default:"false" yaml:"h3"`
+	Path string       `default:"/dns-query" yaml:"path"`
+}
+
+// DNSConfig defines the DNS server listeners (UDP/TCP, DoT, DoH).
+type DNSConfig struct {
+	Port          ListenConfig           `default:"53" yaml:"port"`
+	DOT           ListenConfig           `yaml:"dot"`
+	DOH           DOHConfig              `yaml:"doh"`
+	FreeBind      bool                   `default:"false" yaml:"freeBind"`
 	ProxyProtocol ProxyProtocolListeners `yaml:"proxyProtocol"`
+}
+
+func (c *DNSConfig) SetDefaults() {
+	if len(c.Port) == 0 {
+		c.Port = ListenConfig{":53"}
+	}
+	if c.DOH.Path == "" {
+		c.DOH.Path = "/dns-query"
+	}
+}
+
+func (c *DNSConfig) LogConfig(logger *logrus.Entry) {
+	logger.Infof("dns.port (UDP/TCP) = %s", c.Port)
+	if len(c.DOT) > 0 {
+		logger.Infof("dns.dot           = %s", c.DOT)
+	}
+	if len(c.DOH.Port) > 0 {
+		logger.Infof("dns.doh           = %s (tls=%t, h3=%t, path=%s)", c.DOH.Port, c.DOH.TLS, c.DOH.H3, c.DOH.Path)
+	}
+	logger.Infof("dns.freeBind      = %t", c.FreeBind)
+	logger.Infof("dns.proxyProtocol = %s", c.ProxyProtocol)
+}
+
+func (c *DNSConfig) validate() error {
+	if c.DOH.Path == "" {
+		c.DOH.Path = "/dns-query"
+	}
+
+	if !strings.HasPrefix(c.DOH.Path, "/") {
+		return fmt.Errorf("dns.doh.path must start with '/', got %q", c.DOH.Path)
+	}
+
+	if strings.ContainsAny(c.DOH.Path, " \t") {
+		return fmt.Errorf("dns.doh.path must not contain whitespace, got %q", c.DOH.Path)
+	}
+
+	if strings.Contains(c.DOH.Path, "?") {
+		return fmt.Errorf("dns.doh.path must not contain '?', got %q", c.DOH.Path)
+	}
+
+	if strings.Contains(c.DOH.Path, "#") {
+		return fmt.Errorf("dns.doh.path must not contain '#', got %q", c.DOH.Path)
+	}
+
+	seenProxyProtocolListeners := make(map[ProxyProtocolType]struct{}, len(c.ProxyProtocol))
+	for _, listener := range c.ProxyProtocol {
+		if _, ok := seenProxyProtocolListeners[listener]; ok {
+			return fmt.Errorf("dns.proxyProtocol contains duplicate listener family %q", listener)
+		}
+
+		seenProxyProtocolListeners[listener] = struct{}{}
+	}
+
+	for _, listener := range c.ProxyProtocol {
+		if listenConfig, ok := c.proxyProtocolListenConfig(listener); ok && len(listenConfig) == 0 {
+			return fmt.Errorf("dns.proxyProtocol includes %q but corresponding port is empty", listener)
+		}
+	}
+
+	return nil
+}
+
+func (c *DNSConfig) proxyProtocolListenConfig(listener ProxyProtocolType) (ListenConfig, bool) {
+	switch listener {
+	case ProxyProtocolTypeDns:
+		return c.Port, true
+	case ProxyProtocolTypeHttp:
+		return c.DOH.Port, true
+	case ProxyProtocolTypeHttps:
+		return c.DOH.Port, true
+	case ProxyProtocolTypeTls:
+		return c.DOT, true
+	default:
+		return nil, false
+	}
 }
 
 // ProxyProtocolListeners is the set of TCP listener families that require a PROXY protocol header.
@@ -374,81 +453,16 @@ func (p ProxyProtocolListeners) Has(t ProxyProtocolType) bool {
 	return slices.Contains(p, t)
 }
 
-func (c *Ports) LogConfig(logger *logrus.Entry) {
-	logger.Infof("DNS      = %s", c.DNS)
-	logger.Infof("TLS      = %s", c.TLS)
-	logger.Infof("HTTP     = %s", c.HTTP)
-	logger.Infof("HTTPS    = %s", c.HTTPS)
-	logger.Infof("DOHPath  = %s", c.DOHPath)
-	logger.Infof("Isolate  = %t", c.Isolate)
-	logger.Infof("FreeBind = %t", c.FreeBind)
-	logger.Infof("PROXY protocol = %s", c.ProxyProtocol)
-}
-
-func (c *Ports) validate() error {
-	if c.DOHPath == "" {
-		return errors.New("dohPath must not be empty")
-	}
-
-	if !strings.HasPrefix(c.DOHPath, "/") {
-		return fmt.Errorf("dohPath must start with '/', got %q", c.DOHPath)
-	}
-
-	if strings.ContainsAny(c.DOHPath, " \t") {
-		return fmt.Errorf("dohPath must not contain whitespace, got %q", c.DOHPath)
-	}
-
-	if strings.Contains(c.DOHPath, "?") {
-		return fmt.Errorf("dohPath must not contain '?', got %q", c.DOHPath)
-	}
-
-	if strings.Contains(c.DOHPath, "#") {
-		return fmt.Errorf("dohPath must not contain '#', got %q", c.DOHPath)
-	}
-
-	seenProxyProtocolListeners := make(map[ProxyProtocolType]struct{}, len(c.ProxyProtocol))
-	for _, listener := range c.ProxyProtocol {
-		if _, ok := seenProxyProtocolListeners[listener]; ok {
-			return fmt.Errorf("ports.proxyProtocol contains duplicate listener family %q", listener)
-		}
-
-		seenProxyProtocolListeners[listener] = struct{}{}
-	}
-
-	for _, listener := range c.ProxyProtocol {
-		if listenConfig, ok := c.proxyProtocolListenConfig(listener); ok && len(listenConfig) == 0 {
-			return fmt.Errorf("ports.proxyProtocol includes %q but ports.%s is empty", listener, listener)
-		}
-	}
-
-	return nil
-}
-
-func (c *Ports) proxyProtocolListenConfig(listener ProxyProtocolType) (ListenConfig, bool) {
-	switch listener {
-	case ProxyProtocolTypeDns:
-		return c.DNS, true
-	case ProxyProtocolTypeHttp:
-		return c.HTTP, true
-	case ProxyProtocolTypeHttps:
-		return c.HTTPS, true
-	case ProxyProtocolTypeTls:
-		return c.TLS, true
-	default:
-		return nil, false
-	}
-}
-
 // privilegedPortCeiling is the first non-privileged TCP/UDP port. Ports below
 // it require CAP_NET_BIND_SERVICE (or root) to bind on Linux.
 const privilegedPortCeiling = 1024
 
-// PrivilegedPorts returns the configured listen addresses across DNS, HTTP,
-// HTTPS and TLS whose port is below privilegedPortCeiling.
-func (p *Ports) PrivilegedPorts() []string {
+// PrivilegedPorts returns the configured listen addresses across Web and DNS
+// whose port is below privilegedPortCeiling.
+func (c *Config) PrivilegedPorts() []string {
 	var privileged []string
 
-	for _, lc := range []ListenConfig{p.DNS, p.HTTP, p.HTTPS, p.TLS} {
+	for _, lc := range []ListenConfig{c.DNS.Port, c.DNS.DOT, c.DNS.DOH.Port, c.Web.Port} {
 		for _, addr := range lc {
 			// Port 0 (OS-assigned ephemeral port) is never privileged.
 			if port, ok := extractPort(addr); ok && port > 0 && port < privilegedPortCeiling {
@@ -459,7 +473,6 @@ func (p *Ports) PrivilegedPorts() []string {
 
 	return privileged
 }
-
 // extractPort returns the port number of a listen address. It accepts every
 // ListenConfig form: "53", ":53", "1.2.3.4:53", "[::1]:853", "host:5353".
 func extractPort(addr string) (uint16, bool) {
@@ -709,7 +722,7 @@ func loadConfig(logger *logrus.Entry, path string, mandatory bool) (rCfg *Config
 		return nil, fmt.Errorf("failed to unmarshal config from %s: %w", prettyPath, err)
 	}
 
-	if err := cfg.Ports.validate(); err != nil {
+	if err := cfg.DNS.validate(); err != nil {
 		logger.Fatal(err)
 	}
 
@@ -944,10 +957,10 @@ func (cfg *Config) migrate(logger *logrus.Entry) bool {
 				cfg.Filtering.QueryTypes.Insert(dns.Type(dns.TypeAAAA))
 			}
 		}),
-		"port":         Move(To("ports.dns", &cfg.Ports)),
-		"httpPort":     Move(To("ports.http", &cfg.Ports)),
-		"httpsPort":    Move(To("ports.https", &cfg.Ports)),
-		"tlsPort":      Move(To("ports.tls", &cfg.Ports)),
+		"port":         Move(To("dns.port", &cfg.DNS)),
+		"httpPort":     Move(To("web.port", &cfg.Web)),
+		"httpsPort":    Move(To("dns.doh.port", &cfg.DNS.DOH)),
+		"tlsPort":      Move(To("dns.dot", &cfg.DNS)),
 		"logLevel":     Move(To("log.level", &cfg.Log)),
 		"logFormat":    Move(To("log.format", &cfg.Log)),
 		"logPrivacy":   Move(To("log.privacy", &cfg.Log)),

@@ -35,7 +35,7 @@ var _ = Describe("warnMissingPrivilegedPortCapability", func() {
 		})
 
 		It("does not warn even with a privileged port", func() {
-			warnMissingPrivilegedPortCapability(config.Ports{DNS: config.ListenConfig{":53"}})
+			warnMissingPrivilegedPortCapability(&config.Config{DNS: config.DNSConfig{Port: config.ListenConfig{":53"}}})
 			Expect(loggerHook.AllEntries()).Should(BeEmpty())
 		})
 	})
@@ -46,14 +46,14 @@ var _ = Describe("warnMissingPrivilegedPortCapability", func() {
 		})
 
 		It("warns when a privileged port is configured", func() {
-			warnMissingPrivilegedPortCapability(config.Ports{DNS: config.ListenConfig{":53"}})
+			warnMissingPrivilegedPortCapability(&config.Config{DNS: config.DNSConfig{Port: config.ListenConfig{":53"}}})
 			Expect(loggerHook.LastEntry().Message).Should(ContainSubstring("CAP_NET_BIND_SERVICE"))
 		})
 
 		It("does not warn when only unprivileged ports are configured", func() {
-			warnMissingPrivilegedPortCapability(config.Ports{
-				DNS:  config.ListenConfig{":1053"},
-				HTTP: config.ListenConfig{":4000"},
+			warnMissingPrivilegedPortCapability(&config.Config{
+				DNS: config.DNSConfig{Port: config.ListenConfig{":1053"}},
+				Web: config.WebConfig{Port: config.ListenConfig{":4000"}},
 			})
 			Expect(loggerHook.AllEntries()).Should(BeEmpty())
 		})
@@ -65,7 +65,7 @@ var _ = Describe("warnMissingPrivilegedPortCapability", func() {
 		})
 
 		It("logs one combined warning naming the error and the capability", func() {
-			warnMissingPrivilegedPortCapability(config.Ports{DNS: config.ListenConfig{":53"}})
+			warnMissingPrivilegedPortCapability(&config.Config{DNS: config.DNSConfig{Port: config.ListenConfig{":53"}}})
 			Expect(loggerHook.AllEntries()).Should(HaveLen(1))
 			Expect(loggerHook.LastEntry().Message).Should(SatisfyAll(
 				ContainSubstring("could not adjust process capabilities"),
@@ -74,7 +74,7 @@ var _ = Describe("warnMissingPrivilegedPortCapability", func() {
 		})
 
 		It("logs only the error when no privileged port is configured", func() {
-			warnMissingPrivilegedPortCapability(config.Ports{DNS: config.ListenConfig{":1053"}})
+			warnMissingPrivilegedPortCapability(&config.Config{DNS: config.DNSConfig{Port: config.ListenConfig{":1053"}}})
 			Expect(loggerHook.AllEntries()).Should(HaveLen(1))
 			Expect(loggerHook.LastEntry().Message).Should(ContainSubstring("could not adjust process capabilities"))
 			Expect(loggerHook.LastEntry().Message).ShouldNot(ContainSubstring("CAP_NET_BIND_SERVICE"))

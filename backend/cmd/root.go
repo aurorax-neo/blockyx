@@ -126,8 +126,8 @@ func initConfig() error {
 
 	log.Configure(&logCfg)
 
-	if len(cfg.Ports.HTTP) != 0 {
-		split := strings.Split(cfg.Ports.HTTP[0], ":")
+	if len(cfg.Web.Port) != 0 {
+		split := strings.Split(cfg.Web.Port[0], ":")
 
 		lastIdx := len(split) - 1
 
@@ -141,10 +141,10 @@ func initConfig() error {
 		apiPort = port
 	}
 
-	if len(cfg.Ports.DNS) != 0 {
-		host, port, err := splitListenAddress(cfg.Ports.DNS[0])
+	if len(cfg.DNS.Port) != 0 {
+		host, port, err := splitListenAddress(cfg.DNS.Port[0])
 		if err != nil {
-			return fmt.Errorf("can't parse DNS listen address '%s': %w", cfg.Ports.DNS[0], err)
+			return fmt.Errorf("can't parse DNS listen address '%s': %w", cfg.DNS.Port[0], err)
 		}
 
 		if host != "" {

@@ -105,42 +105,42 @@ var _ = Describe("Config", func() {
 		})
 
 		When("parameter 'port' is set", func() {
-			It("should convert to ports.dns", func() {
+			It("should convert to dns.port", func() {
 				ports := ListenConfig([]string{"5333"})
-				c.Deprecated.DNSPorts = ptrOf(ports) //nolint:modernize // ptrOf(var) is not equivalent to new(T)
+				c.Deprecated.DNSPorts = ptrOf(ports)
 				c.migrate(logger)
-				Expect(hook.Messages).Should(ContainElement(ContainSubstring("ports.dns")))
-				Expect(c.Ports.DNS).Should(Equal(ports))
+				Expect(hook.Messages).Should(ContainElement(ContainSubstring("dns.port")))
+				Expect(c.DNS.Port).Should(Equal(ports))
 			})
 		})
 
 		When("parameter 'httpPort' is set", func() {
-			It("should convert to ports.http", func() {
+			It("should convert to web.port", func() {
 				ports := ListenConfig([]string{"5333"})
-				c.Deprecated.HTTPPorts = ptrOf(ports) //nolint:modernize // ptrOf(var) is not equivalent to new(T)
+				c.Deprecated.HTTPPorts = ptrOf(ports)
 				c.migrate(logger)
-				Expect(hook.Messages).Should(ContainElement(ContainSubstring("ports.http")))
-				Expect(c.Ports.HTTP).Should(Equal(ports))
+				Expect(hook.Messages).Should(ContainElement(ContainSubstring("web.port")))
+				Expect(c.Web.Port).Should(Equal(ports))
 			})
 		})
 
 		When("parameter 'httpsPort' is set", func() {
-			It("should convert to ports.https", func() {
+			It("should convert to dns.doh.port", func() {
 				ports := ListenConfig([]string{"5333"})
-				c.Deprecated.HTTPSPorts = ptrOf(ports) //nolint:modernize // ptrOf(var) is not equivalent to new(T)
+				c.Deprecated.HTTPSPorts = ptrOf(ports)
 				c.migrate(logger)
-				Expect(hook.Messages).Should(ContainElement(ContainSubstring("ports.https")))
-				Expect(c.Ports.HTTPS).Should(Equal(ports))
+				Expect(hook.Messages).Should(ContainElement(ContainSubstring("dns.doh.port")))
+				Expect(c.DNS.DOH.Port).Should(Equal(ports))
 			})
 		})
 
 		When("parameter 'tlsPort' is set", func() {
-			It("should convert to ports.tls", func() {
+			It("should convert to dns.dot", func() {
 				ports := ListenConfig([]string{"5333"})
-				c.Deprecated.TLSPorts = ptrOf(ports) //nolint:modernize // ptrOf(var) is not equivalent to new(T)
+				c.Deprecated.TLSPorts = ptrOf(ports)
 				c.migrate(logger)
-				Expect(hook.Messages).Should(ContainElement(ContainSubstring("ports.tls")))
-				Expect(c.Ports.TLS).Should(Equal(ports))
+				Expect(hook.Messages).Should(ContainElement(ContainSubstring("dns.dot")))
+				Expect(c.DNS.DOT).Should(Equal(ports))
 			})
 		})
 
@@ -1339,9 +1339,8 @@ bootstrapDns:
 })
 
 func defaultTestFileConfig(config *Config) {
-	Expect(config.Ports.DNS).Should(Equal(ListenConfig{":55553", ":55554", "[::1]:55555"}))
-	Expect(config.Ports.HTTP).Should(Equal(ListenConfig{":4000"}))
-	Expect(config.Upstreams.Init.Strategy).Should(Equal(InitStrategyFailOnError))
+	Expect(config.DNS.Port).Should(Equal(ListenConfig{":55553", ":55554", "[::1]:55555"}))
+	Expect(config.Web.Port).Should(Equal(ListenConfig{":4000"}))
 	Expect(config.Upstreams.UserAgent).Should(Equal("testBlocky"))
 	Expect(config.Upstreams.Groups["default"]).Should(HaveLen(3))
 	Expect(config.Upstreams.Groups["default"][0].Host).Should(Equal("8.8.8.8"))
@@ -1441,9 +1440,10 @@ func writeConfigYml(tmpDir *helpertest.TmpFolder) *helpertest.TmpFile {
 		"queryLog:",
 		"  type: csv-client",
 		"  target: /opt/log",
-		"ports:",
-		"  dns: 55553,:55554,[::1]:55555",
-		"  http:",
+		"dns:",
+		"  port: 55553,:55554,[::1]:55555",
+		"web:",
+		"  port:",
 		"    - 4000",
 		"logLevel: debug",
 		"minTlsServeVersion: 1.3",
@@ -1471,12 +1471,11 @@ func writeConfigYmlWithLocalZoneFile(tmpDir *helpertest.TmpFolder, includeStr st
 		"    - A",
 		"fqdnOnly:",
 		"  enable: true",
-		"ports:",
-		"  dns: 55553,:55554,[::1]:55555",
-		"  http:",
+		"dns:",
+		"  port: 55553,:55554,[::1]:55555",
+		"web:",
+		"  port:",
 		"    - 4000",
-		"logLevel: debug",
-		"minTlsServeVersion: 1.3",
 	)
 }
 
@@ -1538,10 +1537,10 @@ func writeConfigDir(tmpDir *helpertest.TmpFolder) {
 		"  enable: true",
 		"queryLog:",
 		"  type: csv-client",
-		"  target: /opt/log",
-		"ports:",
-		"  dns: 55553,:55554,[::1]:55555",
-		"  http:",
+		"dns:",
+		"  port: 55553,:55554,[::1]:55555",
+		"web:",
+		"  port:",
 		"    - 4000",
 		"logLevel: debug",
 		"minTlsServeVersion: 1.3",
@@ -1552,13 +1551,16 @@ var _ = Describe("Ports", func() {
 	suiteBeforeEach()
 
 	Describe("LogConfig", func() {
-		It("should log all port configurations", func() {
-			cfg := Ports{
-				DNS:      ListenConfig{":53"},
-				HTTP:     ListenConfig{":4000"},
-				HTTPS:    ListenConfig{":443"},
-				TLS:      ListenConfig{":853"},
-				DOHPath:  "/dns-query",
+		It("should log web and dns configurations", func() {
+			dnsCfg := DNSConfig{
+				Port: ListenConfig{":53"},
+				DOT:  ListenConfig{":853"},
+				DOH: DOHConfig{
+					Port: ListenConfig{":443"},
+					TLS:  true,
+					H3:   false,
+					Path: "/dns-query",
+				},
 				FreeBind: true,
 				ProxyProtocol: ProxyProtocolListeners{
 					ProxyProtocolTypeDns,
@@ -1567,55 +1569,59 @@ var _ = Describe("Ports", func() {
 					ProxyProtocolTypeTls,
 				},
 			}
+			webCfg := WebConfig{
+				Port: ListenConfig{":4000"},
+				TLS:  false,
+			}
 
-			cfg.LogConfig(logger)
+			dnsCfg.LogConfig(logger)
+			webCfg.LogConfig(logger)
 
 			Expect(hook.Calls).ShouldNot(BeEmpty())
 			Expect(hook.Messages).Should(ContainElements(
-				ContainSubstring("DNS"),
-				ContainSubstring("HTTP"),
-				ContainSubstring("HTTPS"),
-				ContainSubstring("TLS"),
-				ContainSubstring("DOHPath"),
-				ContainSubstring("FreeBind"),
-				ContainSubstring("PROXY protocol = [dns http https tls]"),
+				ContainSubstring("dns.port (UDP/TCP) = [:53]"),
+				ContainSubstring("web.port = [:4000] (tls=false)"),
+				ContainSubstring("dns.dot           = [:853]"),
+				ContainSubstring("dns.doh           = [:443] (tls=true, h3=false, path=/dns-query)"),
+				ContainSubstring("dns.freeBind      = true"),
+				ContainSubstring("dns.proxyProtocol = [dns http https tls]"),
 			))
 		})
 	})
 	Describe("validate", func() {
 		It("should accept the default path", func() {
-			cfg := Ports{DOHPath: "/dns-query"}
+			cfg := DNSConfig{DOH: DOHConfig{Path: "/dns-query"}}
 			Expect(cfg.validate()).Should(Succeed())
 		})
 
 		It("should accept a custom valid path", func() {
-			cfg := Ports{DOHPath: "/my-custom-path"}
+			cfg := DNSConfig{DOH: DOHConfig{Path: "/my-custom-path"}}
 			Expect(cfg.validate()).Should(Succeed())
 		})
 
 		It("should reject an empty path", func() {
-			cfg := Ports{DOHPath: ""}
-			Expect(cfg.validate()).Should(MatchError(ContainSubstring("dohPath must not be empty")))
+			cfg := DNSConfig{DOH: DOHConfig{Path: "   "}}
+			Expect(cfg.validate()).Should(MatchError(ContainSubstring("must start with '/'")))
 		})
 
 		It("should reject a path without leading slash", func() {
-			cfg := Ports{DOHPath: "dns-query"}
-			Expect(cfg.validate()).Should(MatchError(ContainSubstring("dohPath must start with '/'")))
+			cfg := DNSConfig{DOH: DOHConfig{Path: "dns-query"}}
+			Expect(cfg.validate()).Should(MatchError(ContainSubstring("must start with '/'")))
 		})
 
 		It("should reject a path with spaces", func() {
-			cfg := Ports{DOHPath: "/dns query"}
-			Expect(cfg.validate()).Should(MatchError(ContainSubstring("dohPath must not contain whitespace")))
+			cfg := DNSConfig{DOH: DOHConfig{Path: "/dns query"}}
+			Expect(cfg.validate()).Should(MatchError(ContainSubstring("must not contain whitespace")))
 		})
 
 		It("should reject a path with a query string", func() {
-			cfg := Ports{DOHPath: "/dns-query?foo=bar"}
-			Expect(cfg.validate()).Should(MatchError(ContainSubstring("dohPath must not contain '?'")))
+			cfg := DNSConfig{DOH: DOHConfig{Path: "/dns-query?foo=bar"}}
+			Expect(cfg.validate()).Should(MatchError(ContainSubstring("must not contain '?'")))
 		})
 
 		It("should reject a path with a fragment", func() {
-			cfg := Ports{DOHPath: "/dns-query#section"}
-			Expect(cfg.validate()).Should(MatchError(ContainSubstring("dohPath must not contain '#'")))
+			cfg := DNSConfig{DOH: DOHConfig{Path: "/dns-query#section"}}
+			Expect(cfg.validate()).Should(MatchError(ContainSubstring("must not contain '#'")))
 		})
 	})
 })

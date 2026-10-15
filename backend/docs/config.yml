@@ -421,32 +421,26 @@ hostsFile:
     # default: 5
     maxErrorsPerSource: 5
 
-# optional: ports configuration
-ports:
-  # optional: DNS listener port(s) and bind ip address(es)
-  # default: 53 (UDP and TCP)
-  # example: [53, :53, 127.0.0.1:53, [::1]:53]
-  dns:
+# web: Web UI 与 REST API 管理端专用端口配置
+web:
+  port: 4000
+  tls: false
+
+# dns: DNS 数据面监听器配置
+dns:
+  # 普通 DNS 监听端口 (UDP 与 TCP 53)
+  port:
     - 53
     - localhost:5353
-  # optional: Port(s) and bind ip address(es) for DoT (DNS-over-TLS) listener.
-  #           Supports the same formats as `dns` above.
-  # default: none
-  # example: [853, :853, 127.0.0.1:853, [::1]:853]
-  tls: 853
-  # optional: Port(s) and optional bind ip address(es) to serve HTTPS used for prometheus metrics, pprof, REST API, DoH...
-  # example: [443, :443, 127.0.0.1:443, [::1]:443]
-  https: 443
-  # optional: Port(s) and optional bind ip address(es) to serve HTTP used for prometheus metrics, pprof, REST API, DoH...
-  # example: [4000, :4000, 127.0.0.1:4000, [::1]:4000]
-  http: 4000
-  # optional: URL path for DoH queries.
-  # default: /dns-query
-  dohPath: /dns-query
+  # DoT (DNS-over-TLS) 监听端口
+  dot: 853
+  # DoH (DNS-over-HTTPS) 专用端口
+  doh:
+    port: 443
+    h3: false
+    tls: false
+    path: /dns-query
   # optional: allow binding the DNS/DoT listeners to addresses not yet assigned to an interface
-  #           (Linux only, via IP_FREEBIND; e.g. Tailscale/WireGuard/VRRP addresses brought up after
-  #           startup). No effect on wildcard binds; ignored with a warning on non-Linux platforms.
-  # default: false
   freeBind: false
   # optional: require and parse HAProxy PROXY protocol headers on the listed TCP listener families
   #           (any of: dns, http, https, tls). Enable only when Blocky is reachable only through a

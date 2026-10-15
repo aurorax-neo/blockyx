@@ -56,8 +56,9 @@ docker run -d --name blockyx --restart unless-stopped \
  
  | 模块配置项 | 作用说明 | 典型用途与默认行为 |
  | --- | --- | --- |
- | **`upstreams`** | 上游解析器与策略 | 支持 UDP/TCP、DoT、DoH、DoQ，默认 `parallel_best` 并发最快 |
- | **`ports`** | 监听端口与功能隔离 | `dns: 53`，`http: 4000` (管理)，`https: 443` (DoH)，`isolate: true` |
+| **`upstreams`** | 上游解析器与策略 | 支持 UDP/TCP、DoT、DoH、DoQ，默认 `parallel_best` 并发最快 |
+| **`web`** | Web 管理控制端 | `port: 4000` (管理后台)，`tls: false`，专用于 UI 与 API |
+| **`dns`** | DNS 数据解析端 | `port: 53` (普通DNS)，`dot: 853`，`doh.port: 443`，`doh.h3: false`，`doh.tls: false` |
  | **`api`** | API Key 鉴权管理 | 强制校验，空时自动生成并单行回写 |
  | **`caching`** | 响应缓存加速 | 支持 `prefetching` 自动预热、最小/最大 TTL 与否定缓存 |
  | **`blocking`** | 广告与恶意名单拦截 | 支持远程 URL/本地文件黑白名单、定时调度、`zeroIP` / `nxDomain` 阻断 |
@@ -151,38 +152,39 @@ api:
  
  blockyx 同时支持**对外提供加密 DNS 监听**以及**向上游发起加密 DNS 解析**：
  
- #### 1. 对外提供加密 DNS 服务（服务端 Inbound）
- 
- blockyx 支持**端口功能严格隔离模式**（推荐安全部署）：将管理端（Web UI / REST API / 监控）与公共端（DoH 查询）彻底隔离开，避免在对外提供 DoH 解析时泄露管理界面。
- 
- | 协议 | 端口角色 | 监听配置项 | 端口特点与安全边界 | 客户端使用方式 |
- | --- | --- | --- | --- | --- |
- | **Web UI & API** | **专用管理端口** | `ports.http: 4000` | 仅提供 **Web UI**、**REST API**、**监控**，不处理 DoH | 局域网管理员访问后台、监控采集 |
- | **DoH** (DNS-over-HTTPS) | **专用公共端口** | `ports.https: 443` | 仅响应 **/dns-query**，访问 UI 或 API 返回 404 | 浏览器、手机客户端，可放心映射公网 |
- | **DoH3 / QUIC** (HTTP/3) | **专用公共端口** | `http3.enable: true` | 在 `ports.https` 相同的 UDP 端口启用 HTTP/3 | 现代支持 QUIC 的 DoH 客户端，抗弱网丢包 |
- | **DoT** (DNS-over-TLS) | **专用公共端口** | `ports.tls: 853` | 独立原生 TCP-TLS 端口，纯 DNS-over-TLS 解析 | Android 原生“私人 DNS”、`kdig -d @host +tls` |
- 
- 配置示例（推荐的严格隔离模式）：
- 
- ```yaml
- ports:
-   dns: 53                  # 普通 DNS (UDP/TCP)
-   http: 4000               # 专用管理端口 (Web UI + REST API + 监控)，建议仅内网访问
-   https: 443               # 专用 DoH 端口 (仅响应 /dns-query，可映射公网)
-   dohPath: /dns-query
-   isolate: true            # 开启严格功能隔离：443 绝不暴露 Web UI/API；4000 专用于后台
- 
-   # 可选：开启专用 DoT 端口供 Android“私人DNS”直连
-   # tls: 853
- 
- # TLS 证书配置 (开启 ports.https 或 ports.tls 时使用)
- # certFile: /etc/blockyx/cert.pem
- # keyFile: /etc/blockyx/key.pem
- 
- # 可选：在 ports.https 的 UDP 端口开启基于 QUIC 的 HTTP/3 DoH3 服务
- # http3:
- #   enable: true
- ```
+#### 1. 对外提供加密 DNS 服务（服务端 Inbound）
+
+blockyx 采用**控制面 (web) 与数据面 (dns) 顶层分组隔离设计**：将管理端（Web UI / REST API / 监控）与公共端（DoH 查询、DoT）彻底分离为独立的配置对象与专属服务端口，杜绝在对外提供 DoH 解析时泄露管理界面。
+
+| 模块对象 | 端口角色 | 配置字段 | 安全边界与特性 | 客户端使用方式 |
+| --- | --- | --- | --- | --- |
+| **`web`** | **专用管理后台** | `web.port: 4000`, `web.tls: false` | 仅提供 **Web UI**、**REST API**、**监控**，绝不处理 DoH | 局域网管理员访问后台、监控采集 |
+| **`dns.port`** | **普通 DNS 端口** | `dns.port: 53` | 监听标准 UDP 53 与 TCP 53 普通 DNS | 本地局域网设备默认 DNS |
+| **`dns.doh`** | **专用 DoH 端口** | `dns.doh.port: 443`, `tls`, `h3` | 仅响应 **/dns-query**，访问 UI 或 API 返回 404 | 浏览器、手机客户端，可放心映射公网 |
+| **`dns.dot`** | **专用 DoT 端口** | `dns.dot: 853` | 独立原生 TCP-TLS 端口，纯 DNS-over-TLS 解析 | Android 原生“私人 DNS”、`kdig -d @host +tls` |
+
+配置示例（最清晰合理的分组隔离架构）：
+
+```yaml
+# 1. 管理端专用配置 (建议仅在内网访问)
+web:
+  port: 4000
+  tls: false               # true 时使用下方的证书开启 HTTPS 管理后台
+
+# 2. DNS 服务端监听配置 (数据面)
+dns:
+  port: 53                 # 普通 DNS (UDP 与 TCP 53)
+  dot: 853                 # DoT (DNS-over-TLS，供 Android“私人DNS”直连)
+  doh:
+    port: 443              # 专用于 DoH 查询，访问 UI 或 API 绝不暴露 (返回 404)
+    tls: false             # false: 明文 HTTP (用于前置 Nginx/Caddy 做 TLS 卸载); true: 原生 TLS
+    h3: false              # 是否在相同 UDP 端口启用基于 QUIC 的 HTTP/3 DoH3
+    path: /dns-query       # 查询路径 (默认 /dns-query)
+
+# TLS 证书配置 (仅在 web.tls: true、dns.dot 或 dns.doh.tls: true 时需要)
+# certFile: /etc/blockyx/cert.pem
+# keyFile: /etc/blockyx/key.pem
+```
  #### 2. 作为客户端请求上游解析（上游 Outbound）
  
  在 `upstreams.groups` 中支持以下格式：

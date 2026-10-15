@@ -38,7 +38,7 @@ var _ = Describe("Client identity for queries answered at the head of the chain"
 			Blocking:     config.Blocking{BlockType: "zeroIp"},
 			Statistics:   config.Statistics{Enable: true},
 			ClientLookup: config.ClientLookup{ClientnameIPMapping: map[string][]net.IP{clientName: {clientIP}}},
-			Ports:        config.Ports{DOHPath: "/dns-query"},
+			DNS:          config.DNSConfig{DOH: config.DOHConfig{Path: "/dns-query"}},
 		}
 
 		adapt(cfg)

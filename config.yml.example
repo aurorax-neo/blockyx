@@ -29,40 +29,31 @@ minTlsServeVersion: 1.2
 
 
 # ------------------------------------------------------------------------------
-# 2. 监听端口与功能隔离 (ports)
+# 2. Web 管理端服务 (web) 与 DNS 监听服务 (dns) —— 架构级彻底隔离
 # ------------------------------------------------------------------------------
-# 【功能隔离模式 (ports.isolate)】
-# - http 端口 (例如 4000)：专用于内网管理 (Web UI、REST API、Prometheus、调试)，不提供 DoH；
-# - https 端口 (例如 443)：专用于外部 DoH 查询 (/dns-query)，对外彻底屏蔽 Web UI 与管理 API；
-# - 设置 isolate: true 即可开启严格隔离模式，避免将 443 映射到公网时泄露管理界面。
-ports:
-  # 普通 DNS 监听地址与端口 (支持 UDP 与 TCP 53)
-  dns: 53
+# 【控制面与数据面完全解耦】
+# - web: 专用于 Web UI 与 REST API 管理，绝不响应 DoH 查询，保障内网后台安全。
+# - dns: 专用于各类 DNS 数据解析（UDP/TCP 53、DoT 853、DoH 443），绝不暴露后台 UI/API。
+web:
+  port: 4000                                   # Web UI 与 REST API 管理后台监听端口 (推荐仅内网访问)
+  tls: false                                   # 是否启用 HTTPS (true 时使用顶层 certFile/keyFile 证书)
 
-  # 专用管理端口：Web UI + REST API + 监控指标 (默认 4000，推荐仅在内网访问)
-  http: 4000
+dns:
+  # 普通 DNS 监听端口 (同时监听 UDP 53 和 TCP 53)
+  port: 53
 
-  # 专用 DoH 查询端口：开启标准 HTTPS DoH (例如 443，可放心映射公网提供加密解析)
-  # https: 443
+  # DoT (DNS-over-TLS，标准端口 853，供 Android 原生“私人DNS”直连)
+  # dot: 853
 
-  # DoH 查询路径 (默认 /dns-query)
-  # dohPath: /dns-query
+  # DoH (DNS-over-HTTPS) 专用解析配置 (对外彻底屏蔽 Web UI 与管理 API)
+  # doh:
+  #   port: 443                                # 监听端口
+  #   tls: false                               # false: 明文 HTTP (用于前置 Nginx/Caddy 反代做 TLS 卸载); true: 原生 TLS
+  #   h3: false                                # 是否在相同 UDP 端口启用基于 QUIC 的 HTTP/3 DoH3 极速解析
+  #   path: /dns-query                         # 查询路径 (默认 /dns-query)
 
-  # 启用 UI 与 DoH 端口功能隔离 (推荐生产环境开启)：
-  # - http 端口仅提供 Web UI / API，不提供 DoH 解析；
-  # - https 端口仅响应 /dns-query，访问 UI 或 API 直接返回 404，绝不泄露管理后台。
-  # isolate: true
-
-  # 专用 DoT 查询端口 (DNS-over-TLS，标准端口 853，供 Android 原生“私人DNS”直连):
-  # tls: 853
-
-# --- 对外提供基于 QUIC 的 DNS 服务 (DoH3 / HTTP/3) ---
-# 当启用且 ports.https 已配置时，在相同的 UDP 端口 (如 443) 启用 HTTP/3 (QUIC) 监听
-# 客户端支持通过 QUIC 传输层向 /dns-query 发起 DoH 查询 (DoH3)，抗弱网丢包
-# http3:
-#   enable: true
-
-
+  # Linux IP_FREEBIND (可选，允许绑定尚未配置的网卡地址，适合 WireGuard/Tailscale)
+  # freeBind: false
 # ------------------------------------------------------------------------------
 # 3. API Key 认证 (api) —— blockyx 增强
 # ------------------------------------------------------------------------------

@@ -67,7 +67,10 @@ func (s *Server) createOpenAPIInterfaceImpl() (impl api.StrictServerInterface, e
 }
 
 func (s *Server) registerDoHEndpoints(router *chi.Mux, cfg *config.Config) {
-	pathDohQuery := cfg.Ports.DOHPath
+	pathDohQuery := cfg.DNS.DOH.Path
+	if pathDohQuery == "" {
+		pathDohQuery = "/dns-query"
+	}
 
 	router.Get(pathDohQuery, s.dohGetRequestHandler)
 	router.Get(pathDohQuery+"/", s.dohGetRequestHandler)
