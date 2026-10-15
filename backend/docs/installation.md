@@ -62,7 +62,8 @@ dns:
 
         ```sh
         # 准备数据目录并下载配置文件示例
-        curl -o config.yml https://raw.githubusercontent.com/aurorax-neo/blockyx/main/config.yml.example
+        mkdir -p /opt/docker/blockyx/data
+        curl -o /opt/docker/blockyx/config.yml https://raw.githubusercontent.com/aurorax-neo/blockyx/main/config.yml.example
 
         docker run -d \
           --name blockyx \
@@ -70,8 +71,8 @@ dns:
           -p 53:53/udp \
           -p 53:53/tcp \
           -p 4000:4000/tcp \
-          -v $(pwd)/config.yml:/etc/blockyx/config.yml \
-          -v blockyx-data:/data \
+          -v /opt/docker/blockyx/config.yml:/etc/blockyx/config.yml \
+          -v /opt/docker/blockyx/data:/data \
           -e BLOCKYX_API_KEY="your-secret-key" \
           ghcr.io/aurorax-neo/blockyx:latest
         ```
@@ -94,11 +95,8 @@ dns:
               - TZ=Asia/Shanghai
               - BLOCKYX_API_KEY=your-secret-key
             volumes:
-              - ./config.yml:/etc/blockyx/config.yml
-              - blockyx-data:/data
-
-        volumes:
-          blockyx-data:
+              - /opt/docker/blockyx/config.yml:/etc/blockyx/config.yml
+              - /opt/docker/blockyx/data:/data
         ```
 
         启动容器：
@@ -150,13 +148,10 @@ services:
       - "53:53/tcp"
       - "4000:4000/tcp"
     volumes:
-      - ./config.yml:/etc/blockyx/config.yml
-      - blockyx-data:/data
+      - /opt/docker/blockyx/config.yml:/etc/blockyx/config.yml
+      - /opt/docker/blockyx/data:/data
       - ./denylists:/app/denylists:ro
       - ./allowlists:/app/allowlists:ro
-
-volumes:
-  blockyx-data:
 ```
 ## Multiple configuration files
 

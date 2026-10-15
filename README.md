@@ -23,15 +23,16 @@ Web UI 是 Next.js 静态导出，构建时用 `go:embed` 打进二进制。浏�
 
 ```bash
 # 1. 下载示例配置文件并按需修改
-curl -o config.yml https://raw.githubusercontent.com/aurorax-neo/blockyx/main/config.yml.example
+mkdir -p /opt/docker/blockyx/data
+curl -o /opt/docker/blockyx/config.yml https://raw.githubusercontent.com/aurorax-neo/blockyx/main/config.yml.example
 # 编辑 DNS 上游、拦截名单，并设置 api.apiKey (或通过环境变量注入)
 
 # 2. 使用官方发布的预编译镜像运行（多架构支持 linux/amd64, linux/arm64）
 docker run -d --name blockyx --restart unless-stopped \
   -p 53:53/udp -p 53:53/tcp \
   -p 4000:4000 \
-  -v ./config.yml:/etc/blockyx/config.yml \
-  -v blockyx-data:/data \
+  -v /opt/docker/blockyx/config.yml:/etc/blockyx/config.yml \
+  -v /opt/docker/blockyx/data:/data \
   -e BLOCKYX_API_KEY="your-secret-key" \
   ghcr.io/aurorax-neo/blockyx:latest
 ```
@@ -54,13 +55,9 @@ services:
       - TZ=Asia/Shanghai
       - BLOCKYX_API_KEY=your-secret-key
     volumes:
-      - ./config.yml:/etc/blockyx/config.yml
-      - blockyx-data:/data
-
-volumes:
-  blockyx-data:
+      - /opt/docker/blockyx/config.yml:/etc/blockyx/config.yml
+      - /opt/docker/blockyx/data:/data
 ```
-
 启动服务：
 ```bash
 docker compose up -d
