@@ -1,3 +1,12 @@
+ # ==============================================================================
+ # 注意：在 blockyx 中，Web UI 已直接内嵌至 blockyx 单体二进制中。
+ # UI 自动连接本机 API，并完全复用根目录唯一的配置文件 (config.yml)。
+ # 你【不需要】配置本文件，也不需要独立运行任何 UI 进程。
+ # 所有查询日志存储类型（SQLite、MySQL、PostgreSQL、Timescale、CSV 等）
+ # 均在根目录的 config.yml 中的 queryLog 统一配置，UI 会自动适配展示。
+ # 本文件仅作为历史参考保留。
+ # ==============================================================================
+
 # Copy this file to blocky-ui.yml and set the env BLOCKY_UI_CONFIG to its path.
 # For a basic setup, only servers and a url are needed.
 

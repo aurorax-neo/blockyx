@@ -14,11 +14,12 @@ Web UI 是 Next.js 静态导出，构建时用 `go:embed` 打进二进制。浏�
 ## 默认行为
 
 1. **`/api/*` 始终要 API key。** 请求带 `X-API-Key` 或 `Authorization: Bearer <key>`。比较是常量时间。`BLOCKYX_API_KEY` 优先于配置文件里的 `api.apiKey`。两者都空时，进程生成随机 key。能更新单个配置文件时，只改 `api.apiKey` 那一行，其余内容和注释保持原样，并把 key 打印到 stderr。配置路径是目录、只读或写不回去时，不改文件，并说明这个 key 只在本次进程有效。
-2. **查询日志默认 SQLite。** 未写 `queryLog.type` 时使用 `/data/querylog.db`。显式 `type: none` 关闭日志；显式 `type: console` 仍写到标准输出。数据库或 CSV 可通过 `/api/querylog/*` 给 Web UI 检索。`console`、`dnstap`、`none` 不能被 UI 检索。
-3. **CSV 按大小轮转。** `queryLog.rotation` 是字节大小，默认 `100MB`，文件名形如 `2026-10-14_ALL_001.log`。
-4. **日志保留用时长。** 字段是 `queryLog.retention`（例如 `7d`）。`0` 表示不清理。
-5. **统计默认打开，可选落盘。** `statistics.enable` 默认 `true`。`statistics.persistence` 默认关；打开后把小时桶写入 SQLite，重启后仪表盘的 24 小时统计不归零。
-6. **Web UI 用同一个 API key 登录。** key 存在浏览器 `localStorage`（键名 `blockyx_api_key`），没有服务端会话。
+ 2. **全系统单配置与 UI 自动联动。** blockyx 彻底消除了独立 UI 配置文件。DNS 服务与 Web UI 完全共用同一份 `config.yml`。UI 上的查询日志、趋势图和 Top 列表直接调用 `/api/querylog/*`，并自动根据 `queryLog` 配置读取存储。支持 UI 检索的类型包括 `sqlite`、`mysql`、`postgresql`、`timescale`、`csv` 和 `csv-client`。`console`、`dnstap`、`none` 运行时，UI 自动退回使用内存 24 小时统计。
+ 3. **查询日志默认 SQLite。** 未写 `queryLog.type` 时使用 `/data/querylog.db`。显式 `type: none` 关闭日志；显式 `type: console` 写到标准输出。所选写入器创建失败时阻止进程启动，不静默回退。
+ 4. **CSV 按大小轮转。** `queryLog.rotation` 是字节大小，默认 `100MB`，文件名形如 `2026-10-14_ALL_001.log`。
+ 5. **日志保留用时长。** 字段是 `queryLog.retention`（例如 `7d`, `30d`）。`0` 表示不清理。
+ 6. **统计默认打开，可选落盘。** `statistics.enable` 默认 `true`。`statistics.persistence` 默认关；打开后把小时桶写入 SQLite，重启后仪表盘的 24 小时统计不归零。
+ 7. **Web UI 用同一个 API key 登录。** key 存在浏览器 `localStorage`（键名 `blockyx_api_key`），没有服务端会话。
 
 ## 快速开始
 
@@ -70,15 +71,56 @@ api:
   apiKey: "change-me"         # 或使用环境变量 BLOCKYX_API_KEY
 ```
 
-CSV 示例：
-
-```yaml
-queryLog:
-  type: csv                    # 或 csv-client
-  target: /logs                # 必须是已存在的目录
-  rotation: 100MB
-  retention: 7d
-```
+ ### 查询日志存储类型与配置
+ 
+ 只要在 `config.yml` 的 `queryLog` 配置好，UI 将自动获取日志并提供过滤检索，**不需要单独为 UI 配置数据源**。
+ 
+ | 类型 | 适用场景 | Web UI 支持 | 关键配置项 |
+ | --- | --- | :---: | --- |
+ | `sqlite` | 单机/单容器（默认推荐） | **支持** | `target: /data/querylog.db` |
+ | `mysql` | 外置 MySQL / MariaDB | **支持** | `target: "user:pass@tcp(host:3306)/db?charset=utf8mb4&parseTime=True"` |
+ | `postgresql` | 企业级 PostgreSQL | **支持** | `target: "postgres://user:pass@host:5432/db?sslmode=disable"` |
+ | `timescale` | 海量时序数据 (TimescaleDB) | **支持** | 自动创建 Hypertable 与原生 Chunk Retention 策略 |
+ | `csv` | 本地文件，按大小轮转 | **支持** | `target: /logs`, `rotation: 100MB` (自动生成 `_001.log`) |
+ | `csv-client` | 按客户端分文件的轮转 CSV | **支持** | `target: /logs`, `rotation: 50MB` |
+ | `console` | 容器标准输出（stdout） | 仅概览 | 不存盘，UI 仅显示 24h 统计 |
+ | `dnstap` | 外部 SIEM / 流式监听 | 仅概览 | `target: unix:/var/run/dnstap.sock` 或 `tcp://...` |
+ | `none` | 关闭查询日志 | 仅概览 | 零开销 |
+ 
+ 各类型配置示例：
+ 
+ ```yaml
+ # 1. SQLite（默认推荐）
+ queryLog:
+   type: sqlite
+   target: /data/querylog.db
+   retention: 7d
+ 
+ # 2. MySQL / MariaDB (注意 parseTime=True 必需)
+ # queryLog:
+ #   type: mysql
+ #   target: "blockyx:password@tcp(192.168.1.10:3306)/blockyx_logs?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s"
+ #   retention: 30d
+ 
+ # 3. PostgreSQL
+ # queryLog:
+ #   type: postgresql
+ #   target: "postgres://blockyx:password@192.168.1.10:5432/blockyx_logs?sslmode=disable"
+ #   retention: 30d
+ 
+ # 4. TimescaleDB (自动转为 Hypertable，并配置自动 Chunk Drop)
+ # queryLog:
+ #   type: timescale
+ #   target: "postgres://blockyx:password@timescale.lan:5432/blockyx_logs?sslmode=disable"
+ #   retention: 90d
+ 
+ # 5. CSV (按大小自动轮转并清理过期记录)
+ # queryLog:
+ #   type: csv
+ #   target: /logs
+ #   rotation: 100MB
+ #   retention: 7d
+ ```
 
 统计持久化只恢复最近 24 小时的小时桶，供 `/api/stats` 和仪表盘卡片使用。7 天、30 天曲线和可筛选的 Top 列表来自查询日志，不是这张统计表。`kill -9` 最多丢掉一个 `flushInterval` 内尚未刷盘的当前小时桶。
 

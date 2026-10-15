@@ -1229,6 +1229,12 @@ http3:
 Query logging records DNS questions, answers, clients and duration.
 In blockyx the default target is a local SQLite file, not the console and not a daily CSV.
 
+!!! note "Unified configuration: Web UI shares the same queryLog setup"
+    In blockyx, the modern Web UI is embedded directly into the binary and served on the HTTP port.
+    **You only configure query logging once here.**
+    The Web UI queries the live logs and long-term charts through the authenticated `/api/querylog/*` endpoints.
+    Any queryLog storage backend that supports querying (`sqlite`, `mysql`, `postgresql`, `timescale`, `csv`, `csv-client`) is automatically used by the Web UI. There is no need to configure database connections or log sources separately for the UI!
+
 !!! warning
 
     The log file or database contains sensitive information. Tell users when you log their queries.
@@ -1237,18 +1243,17 @@ In blockyx the default target is a local SQLite file, not the console and not a 
 
 Select one of the following query log types:
 
-- `mysql`: each query in an external MySQL/MariaDB database
-- `postgresql`: each query in an external PostgreSQL database
-- `timescale`: each query in an external Timescale database
-- `sqlite`: a local SQLite file. This is the blockyx default when `type` is omitted
-- `csv`: CSV files in a directory, rotated by size
-- `csv-client`: the same, with a separate sequence per client
-- `console`: write to standard output. This must be set explicitly; omitting `type` does not select it
-- `dnstap`: export client query/response events via [dnstap](https://dnstap.info/) (Frame Streams over a Unix socket or TCP)
-- `none`: do not log queries
+- `sqlite`: a local SQLite database (default when `type` is omitted). Full Web UI support.
+- `mysql`: each query in an external MySQL / MariaDB database. Full Web UI support.
+- `postgresql`: each query in an external PostgreSQL database. Full Web UI support.
+- `timescale`: each query in an external TimescaleDB hypertable with automatic chunk retention. Full Web UI support.
+- `csv`: CSV files in a directory, rotated by file size. Full Web UI support.
+- `csv-client`: CSV files separated per client and rotated by size. Full Web UI support.
+- `console`: write structured logs to standard output. Web UI query log browsing not available (overview shows memory statistics).
+- `dnstap`: export client query/response events via dnstap (Frame Streams over Unix socket or TCP). Web UI browsing not available.
+- `none`: do not log queries.
 
-If the selected writer cannot be created, blockyx retries (`creationAttempts`, default 3, spaced by `creationCooldown`, default 2s) and then exits. The process does not start and does not fall back to `console`.
-
+If the selected writer cannot be created at startup, blockyx retries (`creationAttempts`, default 3, spaced by `creationCooldown`, default 2s) and then exits. The process will not start with a broken log writer and will not silently fall back to `console`.
 #### SQLite query log
 
 The `sqlite` target stores the query log in a single local file (set via `queryLog.target`, e.g. `/var/lib/blocky/querylog.db`) — no external database is required. Blocky creates the file and its parent directory automatically.
@@ -1279,6 +1284,114 @@ You can read the database with the `sqlite3` CLI, DB Browser for SQLite, a Grafa
 - **Do not copy only `querylog.db`** for offline reading — you would miss un-checkpointed rows. Instead copy all three files together, run `PRAGMA wal_checkpoint(TRUNCATE);` first, or use `sqlite3 querylog.db ".backup backup.db"` (or `VACUUM INTO`).
 - Use a tool with WAL support (a modern `sqlite3` CLI does).
 
+#### MySQL / MariaDB query log
+
+The `mysql` target stores query logs in a MySQL or MariaDB database.
+
+- **Auto-migration**: blockyx automatically creates the table (`log_entries`), primary key (`id AUTO_INCREMENT`), and indexes (`request_ts`, `client_name`, `response_type`) on startup.
+- **Connection URL (DSN)**: Set `queryLog.target` to a standard Go MySQL driver DSN string.
+- **Required parameter**: `parseTime=True` is **mandatory** so that `request_ts` timestamps are correctly parsed into Go `time.Time` values.
+- **Recommended parameters**: `charset=utf8mb4` for complete UTF-8 support, `loc=Local` to match the server timezone, and `timeout=15s` for network reliability.
+- **Web UI**: Fully supported.
+
+Example:
+```yaml
+queryLog:
+  type: mysql
+  target: "username:password@tcp(localhost:3306)/blockyx_logs?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s"
+  retention: 30d
+  flushInterval: 10s
+```
+
+#### PostgreSQL query log
+
+The `postgresql` target stores query logs in an external PostgreSQL database.
+
+- **Auto-migration**: blockyx automatically creates the schema with a `bigserial primary key` and indexes on `request_ts`, `client_name`, and `response_type`.
+- **Connection URL**: Set `queryLog.target` to a standard PostgreSQL URI: `postgres://[user[:pass]@]host[:port]/dbname?sslmode=[mode]`.
+- **SSL options**: `sslmode=disable`, `sslmode=require`, `sslmode=verify-ca`, or `sslmode=verify-full`.
+- **Security hint**: You can omit the password from the URI and provide it securely via the standard `PGPASSFILE` environment variable.
+- **Web UI**: Fully supported.
+
+Example:
+```yaml
+queryLog:
+  type: postgresql
+  target: "postgres://blockyx:secret@db.lan:5432/blockyx_logs?sslmode=disable"
+  retention: 30d
+  flushInterval: 10s
+```
+
+#### TimescaleDB query log
+
+The `timescale` target is built for high-throughput and long-term time-series DNS analytics.
+
+- **Target URI**: Uses the PostgreSQL connection URI format (connecting to your TimescaleDB instance).
+- **Automatic Hypertable conversion**: On startup, blockyx automatically invokes:
+  `SELECT create_hypertable('log_entries', by_range('request_ts'), if_not_exists => TRUE);`
+- **Native Retention Policy**: Instead of running row-by-row `DELETE` queries that cause table bloat and high WAL writes, blockyx automatically configures:
+  `SELECT add_retention_policy('log_entries', drop_after => INTERVAL 'N days', if_not_exists => TRUE);`
+  TimescaleDB's native background worker drops expired chunks instantly with zero disk fragmentation.
+- **Web UI**: Fully supported.
+
+Example:
+```yaml
+queryLog:
+  type: timescale
+  target: "postgres://blockyx:secret@timescale.lan:5432/blockyx_logs?sslmode=disable"
+  retention: 90d
+  flushInterval: 10s
+```
+
+#### CSV query log (size-rotated)
+
+The `csv` target writes tab-separated query log files into a local directory, rotating when the file exceeds `queryLog.rotation`.
+
+- **Directory requirement**: `target` must be an existing, writable local directory (e.g. `/logs`).
+- **File naming format**: `YYYY-MM-DD_ALL_NNN.log` (e.g. `2026-10-15_ALL_001.log`). If the file size exceeds `rotation`, it increments to `_002.log`.
+- **Size rotation**: Configured via `queryLog.rotation` (e.g. `50MB`, `100MB`, `1GB`). Default is `100MB`.
+- **Retention cleanup**: The cleanup worker periodically scans log files, parses the timestamp in each row, and removes only expired entries while atomically keeping recent ones. Files where all entries have expired are deleted completely.
+- **Web UI**: Fully supported through blockyx's built-in date-bounded CSV stream scanner.
+
+Example:
+```yaml
+queryLog:
+  type: csv
+  target: /logs
+  rotation: 100MB
+  retention: 7d
+```
+
+#### CSV per client (csv-client)
+
+The `csv-client` target works like `csv`, but creates a separate sequence of files for each client.
+
+- **File naming format**: `YYYY-MM-DD_<client>_NNN.log` (e.g. `2026-10-15_my-laptop_001.log`).
+- **Client escaping**: Special characters in client names (slashes, symbols) are safely escaped to underscores (`_`).
+- **Web UI**: Fully supported.
+
+Example:
+```yaml
+queryLog:
+  type: csv-client
+  target: /logs
+  rotation: 50MB
+  retention: 14d
+```
+
+#### Console query log
+
+The `console` target writes log entries directly to standard output (stdout).
+
+- **Intended use**: Containerized environments where logs are scraped by fluentd, Vector, Loki, or CloudWatch.
+- **Web UI limitation**: Because console logs are ephemeral and not saved to disk or database, the Web UI `/api/querylog/status` endpoint reports `supported: false`. The query log table in the Web UI is not available, and dashboard charts fall back to 24-hour in-memory counters.
+
+Example:
+```yaml
+queryLog:
+  type: console
+```
+
 #### dnstap query log
 
 The `dnstap` target streams structured DNS events to an external collector (e.g. `dnstap-read`, SIEM pipelines). Each resolved client query is sent as a dnstap `CLIENT_RESPONSE` frame containing wire-format query and response messages.
@@ -1292,10 +1405,17 @@ Set `queryLog.target` to:
 `queryLog.fields` and `queryLog.retention` do not apply (streaming export, not stored rows or files). `queryLog.flushInterval` controls socket write batching.
 
 !!! note
-    dnstap exports full DNS messages. `log.privacy` obfuscation does not apply to dnstap payloads.
+    dnstap exports full DNS messages. `log.privacy` obfuscation does not apply to dnstap payloads. The Web UI does not query dnstap streams.
 
-!!! note
-    sustained non-zero values mean export loss.
+#### None
+
+Setting `queryLog.type: none` disables query logging entirely. No disk writes, database connections, or log channels are initialized.
+
+Example:
+```yaml
+queryLog:
+  type: none
+```
 
 ### Query log fields
 

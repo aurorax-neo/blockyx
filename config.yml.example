@@ -1,6 +1,11 @@
-# blockyx example configuration.
-# Copy to config.yml and mount it at /etc/blockyx/config.yml (see README.md).
-
+ # blockyx 示例配置文件 (config.yml)
+ # 
+ # 【单配置文件架构】
+ # blockyx 的 Web UI 已直接内嵌至主程序中，DNS 服务与 UI 界面完全共用这一份配置文件。
+ # 所有的查询日志（queryLog）、统计数据（statistics）、拦截名单与 API Key 均在此统一定义，
+ # 无需为 Web UI 维护独立的配置文件或额外的数据库连接配置。
+ #
+ # 复制本文件到 config.yml 并挂载至 /etc/blockyx/config.yml 即可使用。
 upstreams:
   groups:
     default:
@@ -18,15 +23,69 @@ statistics:
     retentionDays: 30
     flushInterval: 5m
 
-# Query log with configurable file rotation (blockyx extension):
-# rotation: max size per file before rotating (e.g. 100MB, 1GB)
-#   -> 2006-01-02_ALL_001.log, 2006-01-02_ALL_002.log, ...
-# retention: how long to keep log files (e.g. 7d, 30d)
-queryLog:
-  type: sqlite
-  target: /data/querylog.db
-  retention: 7d
-
+ # 查询日志配置 (queryLog)
+ # 支持存储类型：sqlite (默认), mysql, postgresql, timescale, csv, csv-client, console, dnstap, none
+ # 只要配置了支持检索的存储类型 (sqlite/mysql/postgresql/timescale/csv/csv-client)，
+ # 内嵌 Web UI 的查询日志与长周期图表将自动复用该配置，无需二次设置。
+ #
+ # --- 选项 1: SQLite（默认开箱即用，单机/容器推荐，UI 支持完整检索）---
+ queryLog:
+   type: sqlite
+   target: /data/querylog.db     # 本地路径，不要加 "file:" 前缀。容器部署请将 /data 挂载为目录卷。
+   retention: 7d                 # 历史记录保留时长 (如 7d, 30d, 168h)。0 表示永久保留。
+   flushInterval: 30s            # 内存缓冲刷盘周期
+ 
+ # --- 选项 2: MySQL / MariaDB（外置数据库，适合多节点共享日志，UI 支持完整检索）---
+ # queryLog:
+ #   type: mysql
+ #   # DSN 格式: username:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s
+ #   # 注意：parseTime=True 是必需的，用于将时间戳解析为 time.Time
+ #   target: "blockyx:password@tcp(192.168.1.10:3306)/blockyx_logs?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s"
+ #   retention: 30d
+ #   flushInterval: 10s
+ 
+ # --- 选项 3: PostgreSQL（企业级关系数据库，高并发，UI 支持完整检索）---
+ # queryLog:
+ #   type: postgresql
+ #   # URI 格式: postgres://username:password@host:port/dbname?sslmode=disable
+ #   target: "postgres://blockyx:password@192.168.1.10:5432/blockyx_logs?sslmode=disable"
+ #   retention: 30d
+ #   flushInterval: 10s
+ 
+ # --- 选项 4: TimescaleDB（时序数据库，适合海量日志，启动时自动建立 Hypertable 与自动 Chunk 保留，UI 支持完整检索）---
+ # queryLog:
+ #   type: timescale
+ #   target: "postgres://blockyx:password@timescale.lan:5432/blockyx_logs?sslmode=disable"
+ #   retention: 90d
+ #   flushInterval: 10s
+ 
+ # --- 选项 5: CSV（本地文件按大小轮转，无需数据库，UI 支持完整检索）---
+ # queryLog:
+ #   type: csv
+ #   target: /logs                 # 日志输出目录（需存在且可写）
+ #   rotation: 100MB               # 单个文件大小上限，达到后自动轮转至 2026-10-15_ALL_002.log
+ #   retention: 7d                 # 超期按行精准清理
+ 
+ # --- 选项 6: CSV per Client（按客户端隔离的轮转 CSV，UI 支持完整检索）---
+ # queryLog:
+ #   type: csv-client
+ #   target: /logs                 # 文件形如 2026-10-15_<client>_001.log
+ #   rotation: 50MB
+ #   retention: 7d
+ 
+ # --- 选项 7: Console（直接输出到终端 stdout，适合容器日志收集平台，UI 不支持历史检索）---
+ # queryLog:
+ #   type: console
+ 
+ # --- 选项 8: dnstap（Frame Streams 流式导出，适合外部安全监控平台，UI 不支持历史检索）---
+ # queryLog:
+ #   type: dnstap
+ #   target: unix:/var/run/dnstap.sock  # 或 tcp://127.0.0.1:6000
+ #   flushInterval: 5s
+ 
+ # --- 选项 9: None（完全关闭查询日志）---
+ # queryLog:
+ #   type: none
 # API key authentication (blockyx extension). REQUIRED: the binary refuses
 # to start when no key is configured (set here or via BLOCKYX_API_KEY).
 # Every /api/* request must carry the key as X-API-Key header
