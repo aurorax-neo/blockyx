@@ -52,8 +52,8 @@ var _ = Describe("Download cache", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  loading:
 					    downloads:
@@ -168,8 +168,8 @@ var _ = Describe("Download cache", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:

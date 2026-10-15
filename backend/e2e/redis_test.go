@@ -190,8 +190,8 @@ var _ = Describe("Redis configuration tests", func() {
 					  groups:
 					    default:
 					      - moka2
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:
@@ -211,8 +211,8 @@ var _ = Describe("Redis configuration tests", func() {
 					  groups:
 					    default:
 					      - moka2
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:
@@ -279,8 +279,8 @@ var _ = Describe("Redis configuration tests", func() {
 					  groups:
 					    default:
 					      - moka1
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					caching:
 					  minTime: 5m
 					redis:

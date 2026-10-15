@@ -34,8 +34,8 @@ var _ = Describe("Restricted capabilities", Label("e2e"), func() {
 				  groups:
 				    default:
 				      - moka1
-				ports:
-				  dns: %d
+				dns:
+				  port: %d
 				`, capDropDNSPort)))
 			Expect(err).Should(Succeed())
 		})

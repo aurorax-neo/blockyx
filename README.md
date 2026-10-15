@@ -189,19 +189,30 @@ dns:
  
  在 `upstreams.groups` 中支持以下格式：
  
- ```yaml
- upstreams:
-   groups:
-     default:
-       - 1.1.1.1                               # 普通 UDP/TCP
-       - tcp-tls:1.1.1.1:853                   # DoT (DNS-over-TLS)
-       - https://dns.google/dns-query          # DoH (DNS-over-HTTPS)
-       - quic:dns.adguard.com                  # DoQ (DNS-over-QUIC, RFC 9250)
-   quic:
-     maxIdleTimeout: 30s
-     keepAlivePeriod: 15s
- ```
+```yaml
+upstreams:
+  groups:
+    default:
+      - 1.1.1.1                               # 普通 UDP/TCP
+      - tcp-tls:1.1.1.1:853                   # DoT (DNS-over-TLS)
+      - https://dns.alidns.com/dns-query      # 阿里公共 DoH
+      - https://doh.pub/dns-query             # 腾讯 DNSPod DoH
+      - quic:dns.adguard.com                  # DoQ (DNS-over-QUIC, RFC 9250)
+  quic:
+    maxIdleTimeout: 30s
+    keepAlivePeriod: 15s
 
+# 引导 DNS 配置 (用于解析域名形式的 DoH/DoT/DoQ 上游，避免循环依赖)
+bootstrapDns:
+  - upstream: https://dns.alidns.com/dns-query
+    ips:
+      - 223.5.5.5
+      - 223.6.6.6
+  - upstream: https://doh.pub/dns-query
+    ips:
+      - 1.12.12.12
+      - 120.53.53.53
+```
 
 统计持久化只恢复最近 24 小时的小时桶，供 `/api/stats` 和仪表盘卡片使用。7 天、30 天曲线和可筛选的 Top 列表来自查询日志，不是这张统计表。`kill -9` 最多丢掉一个 `flushInterval` 内尚未刷盘的当前小时桶。
 

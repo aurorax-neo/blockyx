@@ -40,9 +40,10 @@ var _ = Describe("Basic functionality", func() {
 						  groups:
 						    default:
 						      - moka1
-						ports:
-						  http: 4000
-						  dns: 4000
+						web:
+						  port: 4000
+						dns:
+						  port: 4000
 						`))
 					Expect(err).Should(HaveOccurred())
 
@@ -121,8 +122,8 @@ var _ = Describe("Basic functionality", func() {
 						  groups:
 						    default:
 						      - moka1
-						ports:
-						  http: 4000
+						web:
+						  port: 4000
 						`))
 					Expect(err).Should(Succeed())
 				})

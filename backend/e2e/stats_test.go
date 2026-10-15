@@ -50,8 +50,8 @@ var _ = Describe("Statistics functional tests", func() {
 					      - ads
 					caching:
 					  minTime: 5m
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					statistics:
 					  enable: true
 					`))
@@ -103,8 +103,8 @@ var _ = Describe("Statistics functional tests", func() {
 					  groups:
 					    default:
 					      - moka1
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					`))
 				Expect(err).Should(Succeed())
 			})

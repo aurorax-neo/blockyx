@@ -94,15 +94,23 @@ upstreams:
     keepAlivePeriod: 15s                       # QUIC 保活心跳周期
 
 # 用于解析 DoH / DoT / DoQ 上游主机名的引导 DNS（Bootstrap DNS）
-# 当配置了域名形式的上游（如 https://dns.google/dns-query）时，需要纯 IP DNS 先解析域名
+# 当上游使用了域名（如 https://dns.alidns.com/dns-query）时，必须配置 Bootstrap 引导其 IP，避免循环依赖解析
+# 支持通过固定 IP 数组 (ips) 锁定解析，防止污染：
 # bootstrapDns:
-#   - upstream: 8.8.8.8
+#   # 示例 1: 阿里云公共 DNS (AliDNS DoH 引导)
+#   - upstream: https://dns.alidns.com/dns-query
 #     ips:
-#       - 8.8.8.8
-#   - upstream: 1.1.1.1
+#       - 223.5.5.5
+#       - 223.6.6.6
+#   # 示例 2: 腾讯云 DNSPod (DNSPod DoH 引导)
+#   - upstream: https://doh.pub/dns-query
 #     ips:
-#       - 1.1.1.1
-
+#       - 1.12.12.12
+#       - 120.53.53.53
+#   # 示例 3: 纯 IP 的常规上游解析
+#   - upstream: tcp+udp:223.5.5.5
+#   # 示例 4: 直接读取操作系统的 resolv.conf
+#   # - resolvFile: /etc/resolv.conf
 
 # ------------------------------------------------------------------------------
 # 5. 条件分流上游 (conditional)

@@ -387,15 +387,22 @@ point blocky at the right file. The file is parsed once at startup; its `nameser
 !!! example
 
     ```yaml
-        bootstrapDns:
-          - upstream: tcp-tls:dns.example.com
-            ips:
-            - 123.123.123.123
-          - upstream: https://234.234.234.234/dns-query
-          # read the DHCP-provided resolvers from a file (e.g. OpenWrt)
-          - resolvFile: /tmp/resolv.conf.auto
+    bootstrapDns:
+      # AliDNS DoH upstream resolved by its own bootstrap IPs:
+      - upstream: https://dns.alidns.com/dns-query
+        ips:
+          - 223.5.5.5
+          - 223.6.6.6
+      # Tencent DNSPod DoH upstream resolved by its own bootstrap IPs:
+      - upstream: https://doh.pub/dns-query
+        ips:
+          - 1.12.12.12
+          - 120.53.53.53
+      # Conventional plain IP upstream
+      - upstream: tcp+udp:223.5.5.5
+      # Read the DHCP-provided resolvers from a file (e.g. OpenWrt)
+      - resolvFile: /tmp/resolv.conf.auto
     ```
-
 ## Filtering
 
 Under certain circumstances, it may be useful to filter some types of DNS queries. You can define one or more DNS query
@@ -1201,33 +1208,26 @@ unchanged and stderr says the generated key is valid for this process only.
 
 ## HTTP/3 (DoH3) {#http3}
 
-Serve DNS-over-HTTPS over HTTP/3 (RFC 9114). When enabled, Blocky
-listens on UDP at the same addresses as `ports.https` and answers the
-same endpoints as the HTTPS listener (DoH `/dns-query`, REST API,
-Prometheus metrics, web UI).
+Serve DNS-over-HTTPS over HTTP/3 (RFC 9114). In blockyx, HTTP/3 is configured directly under `dns.doh.h3: true`.
+When enabled together with `dns.doh.tls: true`, blockyx listens on UDP at the same addresses as `dns.doh.port` and serves high-performance DoH over QUIC.
 
-| Parameter    | Type    | Mandatory | Default value | Description                                                   |
-| ------------ | ------- | --------- | ------------- | ------------------------------------------------------------- |
-| http3.enable | boolean | no        | false         | Enable the HTTP/3 listener. Requires `ports.https` to be set. |
+| Parameter    | Type    | Mandatory | Default value | Description                                                                   |
+| ------------ | ------- | --------- | ------------- | ----------------------------------------------------------------------------- |
+| dns.doh.h3   | boolean | no        | false         | Enable the HTTP/3 listener. Requires `dns.doh.port` and `dns.doh.tls: true`. |
 
 **Notes:**
 
-- The HTTP/3 listener uses TLS 1.3 (mandated by RFC 9001). The
-  `minTlsServeVersion` config does not affect it.
-- If `http3.enable` is true but `ports.https` is empty, Blocky logs a
-  warning at startup and does not open any UDP listeners.
-- If `ports.proxyProtocol` includes `https`, HTTP/3 is disabled because
-  QUIC/UDP cannot carry a PROXY protocol header.
-- When HTTP/3 is enabled, HTTPS responses include an `Alt-Svc: h3=...`
-  header so capable clients can switch transports automatically.
+- The HTTP/3 listener uses TLS 1.3 (mandated by RFC 9001).
+- When HTTP/3 is enabled, HTTPS responses include an `Alt-Svc: h3=...` header so capable clients can switch transports automatically.
 
 **Example:**
 
 ```yaml
-ports:
-  https: 443
-http3:
-  enable: true
+dns:
+  doh:
+    port: 443
+    tls: true
+    h3: true
 ```
 
 Query logging records DNS questions, answers, clients and duration.

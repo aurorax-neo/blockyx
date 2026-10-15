@@ -114,7 +114,7 @@ protocol on the Blocky listener and configure the proxy to send it.
 
 !!! warning
 
-    List a listener under `ports.proxyProtocol` only when it is reachable only
+    List a listener under `dns.proxyProtocol` only when it is reachable only
     from trusted proxies. When enabled, Blocky requires a PROXY protocol header
     and uses the source address from that header as the client IP.
 
@@ -132,9 +132,11 @@ protocol on the Blocky listener and configure the proxy to send it.
 !!! example "Blocky"
 
     ```yaml
-    ports:
-      https: 443
-      tls: 853
+    dns:
+      dot: 853
+      doh:
+        port: 443
+        tls: true
       proxyProtocol:
         - https
         - tls

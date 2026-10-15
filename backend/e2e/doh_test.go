@@ -34,9 +34,11 @@ var _ = Describe("DoH functionality", func() {
 					  groups:
 					    default:
 					      - moka1
-					ports:
-					  http: 4000
-					  dohPath: /my-doh-path
+					dns:
+					  doh:
+					    port: 4000
+					    tls: false
+					    path: /my-doh-path
 					`))
 				Expect(err).Should(Succeed())
 			})
@@ -68,8 +70,10 @@ var _ = Describe("DoH functionality", func() {
 					  groups:
 					    default:
 					      - moka1
-					ports:
-					  http: 4000
+					dns:
+					  doh:
+					    port: 4000
+					    tls: false
 					`))
 				Expect(err).Should(Succeed())
 			})
@@ -94,9 +98,11 @@ var _ = Describe("DoH functionality", func() {
 					  groups:
 					    default:
 					      - moka1
-					ports:
-					  https: 4000
-					  dohPath: /my-doh-path
+					dns:
+					  doh:
+					    port: 4000
+					    tls: true
+					    path: /my-doh-path
 					`))
 				Expect(err).Should(Succeed())
 			})

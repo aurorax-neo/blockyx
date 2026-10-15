@@ -153,8 +153,8 @@ var _ = Describe("Per-client rate limiting", func() {
 				  enable: true
 				  rate: 1
 				  burst: 1
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				  path: /metrics

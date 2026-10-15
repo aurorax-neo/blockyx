@@ -20,7 +20,7 @@ var _ = Describe("QueryLogConfig", func() {
 		cfg = QueryLog{
 			Target:           "/dev/null",
 			Type:             QueryLogTypeCsvClient,
-			Retention: 0,
+			Retention:        0,
 			CreationAttempts: 1,
 			CreationCooldown: Duration(time.Millisecond),
 		}

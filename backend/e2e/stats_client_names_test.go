@@ -60,8 +60,8 @@ var _ = Describe("Statistics client identity (issue #2152)", func() {
 			  enable: true
 			statistics:
 			  enable: true
-			ports:
-			  http: 4000
+			web:
+			  port: 4000
 			`))
 		Expect(err).Should(Succeed())
 	})

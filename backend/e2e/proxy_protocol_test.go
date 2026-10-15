@@ -129,10 +129,12 @@ var _ = Describe("PROXY protocol behind an nginx stream proxy", func() {
 func proxyProtocolBlockyConfig(families string) string {
 	return fmt.Sprintf(`log:
   level: info
-ports:
-  dns: 53
-  tls: 853
-  https: 443
+dns:
+  port: 53
+  dot: 853
+  doh:
+    port: 443
+    tls: true
   proxyProtocol: [%s]
 queryLog:
   type: console

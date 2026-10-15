@@ -318,7 +318,7 @@ type Config struct {
 	DNS64 DNS64 `yaml:"dns64"`
 	// DNSSEC validation configuration.
 	DNSSEC DNSSEC `yaml:"dnssec"`
-	HTTP3 HTTP3 `yaml:"http3"`
+	HTTP3  HTTP3  `yaml:"http3"`
 	// HTTP3 is superseded by dns.doh.h3
 	// Per-client DNS query rate limiting configuration.
 	RateLimit RateLimit `yaml:"rateLimit"`
@@ -473,6 +473,7 @@ func (c *Config) PrivilegedPorts() []string {
 
 	return privileged
 }
+
 // extractPort returns the port number of a listen address. It accepts every
 // ListenConfig form: "53", ":53", "1.2.3.4:53", "[::1]:853", "host:5353".
 func extractPort(addr string) (uint16, bool) {

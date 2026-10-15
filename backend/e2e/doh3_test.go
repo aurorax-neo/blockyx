@@ -31,10 +31,11 @@ var _ = Describe("DoH3 functionality", Label("e2e"), func() {
 			  groups:
 			    default:
 			      - moka1
-			ports:
-			  https: 4000
-			http3:
-			  enable: true
+			dns:
+			  doh:
+			    port: 4000
+			    tls: true
+			    h3: true
 		`))
 		Expect(err).Should(Succeed())
 	})

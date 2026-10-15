@@ -55,8 +55,8 @@ var _ = Describe("Metrics functional tests", func() {
 				      - http://httpserver1:8080/list1.txt
 				    group2:
 				      - http://httpserver2:8080/list2.txt
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				`))
@@ -179,8 +179,8 @@ var _ = Describe("Metrics functional tests", func() {
 				  clientGroupsBlock:
 				    default:
 				      - ads
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				caching:
@@ -290,8 +290,8 @@ var _ = Describe("Metrics functional tests", func() {
 				      - http://allowlist1:8080/allowlist1.txt
 				    group2:
 				      - http://allowlist2:8080/allowlist2.txt
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				`))
@@ -335,8 +335,8 @@ var _ = Describe("Metrics functional tests", func() {
 				      - http://nonexistent-host-that-does-not-exist.example:8080/list.txt
 				  loading:
 				    strategy: blocking
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				`))
@@ -374,8 +374,8 @@ var _ = Describe("Metrics functional tests", func() {
 				  groups:
 				    default:
 				      - moka1
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				caching:
@@ -437,8 +437,8 @@ var _ = Describe("Metrics functional tests", func() {
 				  groups:
 				    default:
 				      - moka1
-				ports:
-				  http: 4000
+				web:
+				  port: 4000
 				prometheus:
 				  enable: true
 				caching:

@@ -720,8 +720,8 @@ var _ = Describe("Domain blocking functionality", func() {
 					  groups:
 					    default:
 					      - moka2
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:
@@ -791,8 +791,8 @@ var _ = Describe("Domain blocking functionality", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:

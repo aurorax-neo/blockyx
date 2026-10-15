@@ -31,14 +31,16 @@ blocking:
   clientGroupsBlock:
     default:
       - ads
-ports:
-  dns: 53 # (3)!
-  http: 4000
+web:
+  port: 4000
+  tls: false
+dns:
+  port: 53 # (3)!
 ```
 
 1.  Upstream DNS resolvers blocky forwards allowed queries to. Plain IPs as well as `tcp-tls:` (DoT) and `https://` (DoH) endpoints are supported.
 2.  A named denylist group. Each entry is a URL or local file with hosts/domains to block; reference it from `clientGroupsBlock`.
-3.  Listening ports — `dns` serves DNS (UDP/TCP), `http` serves the REST API and Prometheus metrics.
+3.  Listeners — `web` serves the Web UI and API, `dns` serves DNS queries (UDP/TCP).
 
 ## Run Blocky
 

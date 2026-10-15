@@ -70,8 +70,8 @@ var _ = Describe("Integration tests", func() {
 					  groups:
 					    default:
 					      - default-upstream
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					# Blocking configuration with client groups
 					blocking:
 					  denylists:

@@ -39,11 +39,11 @@ type logEntry struct {
 }
 
 type DatabaseWriter struct {
-	db               *gorm.DB
-	retention time.Duration
-	pendingEntries   []*logEntry
-	lock             sync.RWMutex
-	dbFlushPeriod    time.Duration
+	db             *gorm.DB
+	retention      time.Duration
+	pendingEntries []*logEntry
+	lock           sync.RWMutex
+	dbFlushPeriod  time.Duration
 }
 
 func NewDatabaseWriter(ctx context.Context, dbType config.QueryLogType, target string, retention time.Duration,
@@ -103,9 +103,9 @@ func newDatabaseWriter(ctx context.Context, target gorm.Dialector, retention tim
 	}
 
 	w := &DatabaseWriter{
-		db:               db,
-		retention: retention,
-		dbFlushPeriod:    dbFlushPeriod,
+		db:            db,
+		retention:     retention,
+		dbFlushPeriod: dbFlushPeriod,
 	}
 
 	go w.periodicFlush(ctx)

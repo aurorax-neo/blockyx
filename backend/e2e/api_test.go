@@ -41,8 +41,8 @@ var _ = Describe("API endpoints", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					caching:
 					  minTime: 5m
 					`))
@@ -101,8 +101,8 @@ var _ = Describe("API endpoints", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					`))
 				Expect(err).Should(Succeed())
 			})
@@ -165,8 +165,8 @@ var _ = Describe("API endpoints", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:
@@ -234,8 +234,8 @@ var _ = Describe("API endpoints", func() {
 					  groups:
 					    default:
 					      - moka
-					ports:
-					  http: 4000
+					web:
+					  port: 4000
 					blocking:
 					  denylists:
 					    ads:
