@@ -50,8 +50,33 @@ docker run -d --name blockyx --restart unless-stopped \
 
 ## 配置
 
-完整 DNS 配置见 `backend/docs/configuration.md` 和 `config.yml.example`。blockyx 需要注意的片段：
-
+ 完整全量配置详解与真实模板见仓库根目录 **`config.yml.example`**（包含全部 24 个模块的详尽中文注释）与 `backend/docs/configuration.md`。
+ 
+ ### 核心模块速查表
+ 
+ | 模块配置项 | 作用说明 | 典型用途与默认行为 |
+ | --- | --- | --- |
+ | **`upstreams`** | 上游解析器与策略 | 支持 UDP/TCP、DoT、DoH、DoQ，默认 `parallel_best` 并发最快 |
+ | **`ports`** | 监听端口与功能隔离 | `dns: 53`，`http: 4000` (管理)，`https: 443` (DoH)，`isolate: true` |
+ | **`api`** | API Key 鉴权管理 | 强制校验，空时自动生成并单行回写 |
+ | **`caching`** | 响应缓存加速 | 支持 `prefetching` 自动预热、最小/最大 TTL 与否定缓存 |
+ | **`blocking`** | 广告与恶意名单拦截 | 支持远程 URL/本地文件黑白名单、定时调度、`zeroIP` / `nxDomain` 阻断 |
+ | **`clientLookup`**| 客户端设备识别 | 通过路由器 rDNS PTR 反查或静态 IP 映射识别客户端名称并在 UI 展示 |
+ | **`customDNS`** | 自定义静态域名解析 | 局域网主机名、内网服务 A/AAAA 映射或标准 Zone 文件 |
+ | **`conditional`**| 条件分流解析 | 将特定后缀（如 `*.lan`, `*.corp`）定向转发给内部 DNS |
+ | **`statistics`** | 仪表盘统计与持久化 | `persistence: true` 写入 SQLite，重启后 24h 统计图表不归零 |
+ | **`queryLog`** | 查询日志多存储后端 | SQLite、MySQL、PostgreSQL、Timescale、CSV 等，UI 自动复用 |
+ | **`dnssec`** | DNSSEC 签名安全校验 | 验证上游响应密码学签名，防御 DNS 缓存投毒与劫持 |
+ | **`rebindingProtection`** | 域名重绑定防护 | 阻断公网域名解析返回内网私有 IP，防御 Rebinding 渗透 |
+ | **`rateLimit`** | 客户端 QPS 速率限制 | 针对单客户端限制请求频次，防御反射放大攻击与异常脚本 |
+ | **`filtering`** | 查询类型过滤 | 例如过滤 `AAAA` 阻断 IPv6 解析 |
+ | **`ede`** | 扩展 DNS 错误响应 | RFC 8914 标准错误码反馈 |
+ | **`ecs`** | EDNS Client Subnet | 传递客户端子网以获得最近的 CDN 节点加速 |
+ | **`redis`** | 分布式集群同步 | 多节点 blockyx 共享缓存与拦截状态 |
+ | **`prometheus`**| 监控指标暴露 | 兼容 Prometheus 格式供 Grafana 采集 |
+ | **`log`** | 运行日志 | 控制控制台输出级别、格式与隐私脱敏 |
+ 
+ 常用核心配置片段：
 ```yaml
 statistics:
   enable: true                 # 默认已是 true；false 时 /api/stats 返回 503

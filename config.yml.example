@@ -1,160 +1,456 @@
- # blockyx 示例配置文件 (config.yml)
- # 
- # 【单配置文件架构】
- # blockyx 的 Web UI 已直接内嵌至主程序中，DNS 服务与 UI 界面完全共用这一份配置文件。
- # 所有的查询日志（queryLog）、统计数据（statistics）、拦截名单与 API Key 均在此统一定义，
- # 无需为 Web UI 维护独立的配置文件或额外的数据库连接配置。
- #
- # 复制本文件到 config.yml 并挂载至 /etc/blockyx/config.yml 即可使用。
- # 上游 DNS 解析器组 (upstreams)
- # 支持多种协议：
- # - 普通 UDP/TCP: 8.8.8.8, 1.1.1.1
- # - DoT (DNS-over-TLS): tcp-tls:1.1.1.1:853 或 tcp-tls:dns.google:853
- # - DoH (DNS-over-HTTPS): https://dns.google/dns-query 或 https://cloudflare-dns.com/dns-query
- # - DoQ (DNS-over-QUIC, RFC 9250): quic:dns.adguard.com 或 quic:94.140.14.14:853
- upstreams:
-   groups:
-     default:
-       - 8.8.8.8
-       - 1.1.1.1
-       # - tcp-tls:1.1.1.1:853                # DoT 上游
-       # - https://dns.google/dns-query       # DoH 上游
-       # - quic:dns.adguard.com              # DoQ (QUIC) 上游
-   # 可选：QUIC 上游连接微调
-   # quic:
-   #   maxIdleTimeout: 30s
-   #   keepAlivePeriod: 15s
-# Required for the web UI dashboard cards (served at /api/stats).
-# Without this, the UI statistics show "statistics are disabled".
-statistics:
-  enable: true
-  # 统计持久化（blockyx）：每小时桶写入 sqlite，重启后仪表盘数据不丢失
-  persistence:
-    enable: true
-    path: /data/blockyx-stats.db
-    retentionDays: 30
-    flushInterval: 5m
+# ==============================================================================
+# blockyx 全功能完整配置详解示范 (config.yml)
+# ==============================================================================
+#
+# 【单配置文件架构】
+# blockyx 采用单一配置设计，内嵌的 Web 管理界面与 DNS 服务完全共用这一份配置文件。
+# 所有的解析、拦截、加密 (DoT/DoH/QUIC)、日志、统计与安全选项均在此统一管理，
+# 无需为 Web UI 单独维护数据库连接或额外配置文件。
+#
+# 复制本文件为 config.yml 并挂载至 /etc/blockyx/config.yml 即可开箱即用。
+# ==============================================================================
 
- # 查询日志配置 (queryLog)
- # 支持存储类型：sqlite (默认), mysql, postgresql, timescale, csv, csv-client, console, dnstap, none
- # 只要配置了支持检索的存储类型 (sqlite/mysql/postgresql/timescale/csv/csv-client)，
- # 内嵌 Web UI 的查询日志与长周期图表将自动复用该配置，无需二次设置。
- #
- # --- 选项 1: SQLite（默认开箱即用，单机/容器推荐，UI 支持完整检索）---
- queryLog:
-   type: sqlite
-   target: /data/querylog.db     # 本地路径，不要加 "file:" 前缀。容器部署请将 /data 挂载为目录卷。
-   retention: 7d                 # 历史记录保留时长 (如 7d, 30d, 168h)。0 表示永久保留。
-   flushInterval: 30s            # 内存缓冲刷盘周期
- 
- # --- 选项 2: MySQL / MariaDB（外置数据库，适合多节点共享日志，UI 支持完整检索）---
- # queryLog:
- #   type: mysql
- #   # DSN 格式: username:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s
- #   # 注意：parseTime=True 是必需的，用于将时间戳解析为 time.Time
- #   target: "blockyx:password@tcp(192.168.1.10:3306)/blockyx_logs?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s"
- #   retention: 30d
- #   flushInterval: 10s
- 
- # --- 选项 3: PostgreSQL（企业级关系数据库，高并发，UI 支持完整检索）---
- # queryLog:
- #   type: postgresql
- #   # URI 格式: postgres://username:password@host:port/dbname?sslmode=disable
- #   target: "postgres://blockyx:password@192.168.1.10:5432/blockyx_logs?sslmode=disable"
- #   retention: 30d
- #   flushInterval: 10s
- 
- # --- 选项 4: TimescaleDB（时序数据库，适合海量日志，启动时自动建立 Hypertable 与自动 Chunk 保留，UI 支持完整检索）---
- # queryLog:
- #   type: timescale
- #   target: "postgres://blockyx:password@timescale.lan:5432/blockyx_logs?sslmode=disable"
- #   retention: 90d
- #   flushInterval: 10s
- 
- # --- 选项 5: CSV（本地文件按大小轮转，无需数据库，UI 支持完整检索）---
- # queryLog:
- #   type: csv
- #   target: /logs                 # 日志输出目录（需存在且可写）
- #   rotation: 100MB               # 单个文件大小上限，达到后自动轮转至 2026-10-15_ALL_002.log
- #   retention: 7d                 # 超期按行精准清理
- 
- # --- 选项 6: CSV per Client（按客户端隔离的轮转 CSV，UI 支持完整检索）---
- # queryLog:
- #   type: csv-client
- #   target: /logs                 # 文件形如 2026-10-15_<client>_001.log
- #   rotation: 50MB
- #   retention: 7d
- 
- # --- 选项 7: Console（直接输出到终端 stdout，适合容器日志收集平台，UI 不支持历史检索）---
- # queryLog:
- #   type: console
- 
- # --- 选项 8: dnstap（Frame Streams 流式导出，适合外部安全监控平台，UI 不支持历史检索）---
- # queryLog:
- #   type: dnstap
- #   target: unix:/var/run/dnstap.sock  # 或 tcp://127.0.0.1:6000
- #   flushInterval: 5s
- 
- # --- 选项 9: None（完全关闭查询日志）---
- # queryLog:
- #   type: none
-# API key authentication (blockyx extension). REQUIRED: the binary refuses
-# to start when no key is configured (set here or via BLOCKYX_API_KEY).
-# Every /api/* request must carry the key as X-API-Key header
-# or as Authorization: Bearer <key> header, otherwise it gets 401.
-# The BLOCKYX_API_KEY environment variable takes precedence over this value.
-# In docker, the entrypoint generates a random key when neither is set.
+# ------------------------------------------------------------------------------
+# 1. 基础网络与 TLS 设置 (Basic & TLS)
+# ------------------------------------------------------------------------------
+# 出站请求所使用的 IP 协议版本：
+# - dual: 默认，同时使用 IPv4 和 IPv6
+# - v4: 仅使用 IPv4 发起上游连接与下载
+# - v6: 仅使用 IPv6
+connectIPVersion: dual
+
+# 对外提供 DoT / DoH / HTTPS 时的最低 TLS 协议版本 (默认: 1.2，可选: 1.3)
+minTlsServeVersion: 1.2
+
+# TLS 证书与私钥路径（对外提供 DoT、DoH、HTTPS 以及 Web UI HTTPS 所需）
+# 若留空，blockyx 会在启动时自动生成内存自签名证书（建议生产环境挂载合法证书）
+# certFile: /etc/blockyx/cert.pem
+# keyFile: /etc/blockyx/key.pem
+
+
+# ------------------------------------------------------------------------------
+# 2. 监听端口与功能隔离 (ports)
+# ------------------------------------------------------------------------------
+# 【功能隔离模式 (ports.isolate)】
+# - http 端口 (例如 4000)：专用于内网管理 (Web UI、REST API、Prometheus、调试)，不提供 DoH；
+# - https 端口 (例如 443)：专用于外部 DoH 查询 (/dns-query)，对外彻底屏蔽 Web UI 与管理 API；
+# - 设置 isolate: true 即可开启严格隔离模式，避免将 443 映射到公网时泄露管理界面。
+ports:
+  # 普通 DNS 监听地址与端口 (支持 UDP 与 TCP 53)
+  dns: 53
+
+  # 专用管理端口：Web UI + REST API + 监控指标 (默认 4000，推荐仅在内网访问)
+  http: 4000
+
+  # 专用 DoH 查询端口：开启标准 HTTPS DoH (例如 443，可放心映射公网提供加密解析)
+  # https: 443
+
+  # DoH 查询路径 (默认 /dns-query)
+  # dohPath: /dns-query
+
+  # 启用 UI 与 DoH 端口功能隔离 (推荐生产环境开启)：
+  # - http 端口仅提供 Web UI / API，不提供 DoH 解析；
+  # - https 端口仅响应 /dns-query，访问 UI 或 API 直接返回 404，绝不泄露管理后台。
+  # isolate: true
+
+  # 专用 DoT 查询端口 (DNS-over-TLS，标准端口 853，供 Android 原生“私人DNS”直连):
+  # tls: 853
+
+# --- 对外提供基于 QUIC 的 DNS 服务 (DoH3 / HTTP/3) ---
+# 当启用且 ports.https 已配置时，在相同的 UDP 端口 (如 443) 启用 HTTP/3 (QUIC) 监听
+# 客户端支持通过 QUIC 传输层向 /dns-query 发起 DoH 查询 (DoH3)，抗弱网丢包
+# http3:
+#   enable: true
+
+
+# ------------------------------------------------------------------------------
+# 3. API Key 认证 (api) —— blockyx 增强
+# ------------------------------------------------------------------------------
+# blockyx 进程强制要求 API Key 鉴权。Web UI 登录、控制命令与 /api/*、/debug 均需校验。
+# 请求时需携带 X-API-Key: <key> 或 Authorization: Bearer <key> 请求头。
+# 若留空，容器启动时会自动生成随机密钥并单行持久化回写至本文件。
+# 也可以通过系统环境变量 BLOCKYX_API_KEY 注入（优先级高于配置文件）。
 api:
-  apiKey: ""
+  apiKey: "change-me"
 
+
+# ------------------------------------------------------------------------------
+# 4. 上游 DNS 解析器组 (upstreams)
+# ------------------------------------------------------------------------------
+upstreams:
+  # 上游查询策略：
+  # - parallel_best: 默认，向所有上游并发查询，采用最快响应并统计健康度
+  # - strict: 严格按列表顺序查询，首个失败才尝试下一个
+  # - round_robin: 轮询负载均衡
+  # - random: 随机选择上游
+  strategy: parallel_best
+
+  # 上游解析超时时长 (默认 2s)
+  timeout: 2s
+
+  # 解析组定义：default 组为默认组，可按网络 CIDR 分组定制
+  groups:
+    default:
+      - 8.8.8.8                                # 普通 UDP/TCP (端口缺省为 53)
+      - 1.1.1.1
+      - tcp-tls:1.1.1.1:853                    # DoT (DNS-over-TLS)
+      - https://dns.google/dns-query           # DoH (DNS-over-HTTPS)
+      - quic:dns.adguard.com                   # DoQ (DNS-over-QUIC, RFC 9250)
+
+  # QUIC (DoQ) 上游连接微调（可选）
+  quic:
+    maxIdleTimeout: 30s                        # QUIC 空闲连接超时
+    keepAlivePeriod: 15s                       # QUIC 保活心跳周期
+
+# 用于解析 DoH / DoT / DoQ 上游主机名的引导 DNS（Bootstrap DNS）
+# 当配置了域名形式的上游（如 https://dns.google/dns-query）时，需要纯 IP DNS 先解析域名
+# bootstrapDns:
+#   - upstream: 8.8.8.8
+#     ips:
+#       - 8.8.8.8
+#   - upstream: 1.1.1.1
+#     ips:
+#       - 1.1.1.1
+
+
+# ------------------------------------------------------------------------------
+# 5. 条件分流上游 (conditional)
+# ------------------------------------------------------------------------------
+# 针对特定的域名后缀，将解析请求转发给专用的内部 DNS（如本地路由器或内网 DNS）
+# conditional:
+#   mapping:
+#     lan: 192.168.1.1                         # 所有 *.lan 域名请求转发至路由器
+#     home.arpa: 192.168.1.1
+#     corp.example.com: 10.0.0.53,10.0.0.54     # 多个上游用逗号隔开
+
+
+# ------------------------------------------------------------------------------
+# 6. 自定义静态 DNS 解析 (customDNS)
+# ------------------------------------------------------------------------------
+customDNS:
+  # 自定义记录的缓存有效时间 (TTL)
+  customTTL: 1h
+
+  # 简单域名 -> IP 映射（多个 IP 用逗号隔开，自动支持 A 与 AAAA 记录）
+  mapping:
+    router.lan: 192.168.1.1
+    nas.lan: 192.168.1.200
+    server.lan: 192.168.1.100,fe80::1
+
+  # 未定义的查询类型处理：
+  # - true: 默认，如果该域名仅配置了 A 记录，客户端查询 AAAA 时直接返回空（NOERROR），不向上游查询
+  # - false: 向上游转发查询未映射的类型
+  filterUnmappedTypes: true
+
+  # 进阶：内联标准 DNS Zone 区域文件定义（支持 CNAME, TXT, SRV 等复杂记录）
+  # zone: |
+  #   $ORIGIN example.com.
+  #   api   IN CNAME server.lan.
+  #   txt   IN TXT   "v=spf1 ~all"
+
+
+# ------------------------------------------------------------------------------
+# 7. 本地 Hosts 文件 (hostsFile)
+# ------------------------------------------------------------------------------
+# 读取宿主机上的 hosts 格式文件进行静态解析
+# hostsFile:
+#   sources:
+#     - /etc/hosts
+#   hostsTTL: 1h                               # 缓存时长
+#   filterLoopback: true                       # 过滤回环地址 (127.0.0.1 / ::1)
+
+
+# ------------------------------------------------------------------------------
+# 8. 响应缓存加速 (caching)
+# ------------------------------------------------------------------------------
+caching:
+  # 最小缓存时长：上游返回的 TTL 若低于此值，强制提升为该值，降低上游查询频次
+  minTime: 5m
+
+  # 最大缓存时长：上游返回的 TTL 若高于此值，缩短为该值。设置为 -1 可关闭缓存，0 使用上游 TTL
+  maxTime: 24h
+
+  # 否定结果缓存 (NXDOMAIN 或空响应) 的保留时间 (默认 30m，设为 -1 禁用否定缓存)
+  cacheTimeNegative: 30m
+
+  # 最大内存缓存条目数（软限制，默认 0 表示无限制）
+  maxItemsCount: 100000
+
+  # 智能预取机制 (Prefetching)：在常用域名缓存即将过期前，自动在后台提前向上游刷新，实现 0ms 命中
+  prefetching: true
+  prefetchExpires: 2h                          # 追踪查询频次的活跃时间窗口
+  prefetchThreshold: 5                         # 时间窗口内被查询达到该次数即触发预取
+  prefetchMaxItemsCount: 0                     # 预取域名追踪数量上限 (0 无限制)
+
+  # 永不缓存的域名正则列表
+  # exclude:
+  #   - "^.*\\.dynamic\\.example\\.com$"
+
+
+# ------------------------------------------------------------------------------
+# 9. 广告与恶意域名拦截 (blocking)
+# ------------------------------------------------------------------------------
 blocking:
+  # 黑名单来源定义（支持远程 HTTP/HTTPS URL、本地文件路径、或内联配置）
   denylists:
     ads:
       - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
-  clientGroupsBlock:
-    default:
-      - ads
+    # 更多名单组：
+    # malware:
+    #   - https://malware-filter.gitlab.io/malware-filter/phishing-filter-hosts.txt
 
-customDNS:
-  mapping:
-    router.lan: 192.168.1.1
- # 监听端口与服务配置 (ports)
- # 【UI 与 DoH 专用端口功能隔离设计】
- # blockyx 支持将管理后台 (Web UI/API) 与公共 DNS (DoH) 严格隔离在不同端口，各自专用：
- # - http 端口 (例如 4000)：专用于内网管理 (Web UI、REST API、Prometheus、调试)，不提供 DoH；
- # - https 端口 (例如 443)：专用于外部 DoH 查询 (/dns-query)，对外彻底屏蔽 Web UI 与管理 API；
- # - 设置 isolate: true 即可开启严格隔离模式，避免将 443 映射到公网时泄露管理界面。
- ports:
-   # 普通 DNS (UDP/TCP 53)
-   dns: 53
- 
-   # 专用管理端端口：Web UI + REST API + 监控指标 (默认 4000，推荐仅在内网访问)
-   http: 4000
- 
-   # 专用 DoH 查询端口：开启标准 HTTPS DoH (例如 443，可放心映射公网提供加密解析)
-   # https: 443
- 
-   # DoH 查询路径 (默认 /dns-query)
-   # dohPath: /dns-query
- 
-   # 启用 UI 与 DoH 端口功能隔离 (推荐生产环境开启)：
-   # - http 端口仅提供 Web UI / API，不提供 DoH 解析；
-   # - https 端口仅响应 /dns-query，访问 UI 或 API 直接返回 404，绝不泄露管理后台。
-   # isolate: true
- 
-   # 专用 DoT 查询端口 (DNS-over-TLS，标准端口 853，供 Android 原生私人 DNS 直连):
-   # tls: 853
- 
- # TLS 证书配置 (仅在开启原生的 ports.https 或 ports.tls 时使用；未配置自动生成自签名证书)
- # certFile: /etc/blockyx/cert.pem
- # keyFile: /etc/blockyx/key.pem
- 
- # 开启基于 QUIC 的 HTTP/3 (DoH3) 服务 (需要配置 ports.https，在相同 UDP 端口监听)
- # http3:
- #   enable: true
- prometheus:
-   enable: true
-   path: /metrics
- 
- log:
-   level: info
+  # 白名单定义（优先级高于同组的黑名单，用于修正误杀）
+  allowlists:
+    ads:
+      - https://raw.githubusercontent.com/anudeepND/whitelist/master/domains/whitelist.txt
+      # 支持本地内联白名单
+      # - inline: |
+      #     example.com
+      #     *.apple.com
+
+  # 客户端与黑名单组的绑定规则（支持 IP、CIDR 网段、或 clientLookup 识别的客户端名称）
+  clientGroupsBlock:
+    default:                                   # 默认所有未指定客户端应用的名单
+      - ads
+    # 针对儿童房设备定制：
+    # 192.168.1.50:
+    #   - ads
+    #   - malware
+
+  # 拦截阻断方式：
+  # - zeroIP: 默认，A/AAAA 查询返回 0.0.0.0 和 ::，其它类型返回 NXDOMAIN（快速安全且不阻塞客户端）
+  # - nxDomain: 返回标准 NXDOMAIN（域名不存在）状态码
+  # - refused: 返回 REFUSED 拒绝状态码
+  # - 也可以指定为特定重定向 IP：例如 "192.168.1.200"
+  blockType: zeroIP
+
+  # 拦截响应的客户端缓存 TTL (默认 6h，避免客户端频繁重试被拦截的广告请求)
+  blockTTL: 6h
+
+  # 名单加载与周期自动刷新设置
+  loading:
+    refreshPeriod: 4h                          # 远程名单自动重新拉取刷新的间隔时间 (默认 4h)
+    downloads:
+      timeout: 60s                             # 单个名单下载超时
+      attempts: 3                              # 下载重试次数
+      cooldown: 5s                             # 重试间隔
+    strategy: failOnError                      # 启动策略：failOnError (下载失败阻止启动), blocking, fast
+    concurrency: 4                             # 并发下载工作线程数
+
+
+# ------------------------------------------------------------------------------
+# 10. 客户端设备名称识别 (clientLookup)
+# ------------------------------------------------------------------------------
+# 将客户端 IP 自动转换为易读的设备名称，便于在 Web UI 查询日志和统计图表中识别设备
+clientLookup:
+  # 向上游路由器或 DHCP 服务器反向查询 PTR 记录 (rDNS) 解析设备名称
+  upstream: 192.168.1.1
+
+  # 也可以静态指定部分设备的 IP 与名称对应关系
+  clients:
+    laptop:
+      - 192.168.1.100
+    mobile-phone:
+      - 192.168.1.101
+
+
+# ------------------------------------------------------------------------------
+# 11. DNSSEC 安全校验 (dnssec)
+# ------------------------------------------------------------------------------
+# 开启针对上游 DNS 响应的 DNSSEC 密码学签名校验，抵御 DNS 欺骗与投毒攻击
+# dnssec:
+#   validate: true                             # 开启 DNSSEC 校验
+#   trustAnchors: []                           # 自定义信任根 (留空默认使用 IANA 官方根公钥)
+#   clockSkewToleranceSec: 3600                # 允许的时钟偏移容忍度（秒）
+
+
+# ------------------------------------------------------------------------------
+# 12. DNS 域名重绑定防护 (rebindingProtection)
+# ------------------------------------------------------------------------------
+# 阻断公网域名解析返回内网私有 IP 地址的攻击行为（DNS Rebinding 攻击）
+# rebindingProtection:
+#   enable: true                               # 开启重绑定保护
+#   # 允许解析为私有 IP 的合法域名白名单（如内网域名、动态 DNS 域名）：
+#   allowedDomains:
+#     - plex.direct
+#     - *.my-home.com
+
+
+# ------------------------------------------------------------------------------
+# 13. 客户端查询速率限制 (rateLimit)
+# ------------------------------------------------------------------------------
+# 针对单客户端 IP 施加 QPS 速率限制，防止恶意脚本滥用或成为 DNS 反射放大攻击跳板
+# rateLimit:
+#   enable: false                              # 默认关闭
+#   rate: 100                                  # 每秒允许的持续查询数 (QPS)
+#   burst: 200                                 # 允许突发的最大令牌桶容量
+#   allowlist:                                 # 不受限流影响的内网白名单 CIDR
+#     - 127.0.0.1/32
+#     - 192.168.1.0/24
+
+
+# ------------------------------------------------------------------------------
+# 14. 查询类型过滤 (filtering)
+# ------------------------------------------------------------------------------
+# 过滤指定的 DNS 查询类型，匹配的查询将直接返回空结果 (NOERROR)
+# filtering:
+#   queryTypes:
+#     - AAAA                                   # 禁用 IPv6 解析 (在纯 IPv4 或 IPv6 劣质网络中提升体验)
+
+
+# ------------------------------------------------------------------------------
+# 15. 完全限定域名检查 (fqdnOnly)
+# ------------------------------------------------------------------------------
+# 仅允许包含点号 (.) 的完全限定域名 (FQDN) 查询，单个单词形式的主机名直接返回 NXDOMAIN
+# fqdnOnly:
+#   enable: false
+
+
+# ------------------------------------------------------------------------------
+# 16. 扩展 DNS 错误响应 (ede - RFC 8914)
+# ------------------------------------------------------------------------------
+# 在拦截、失败等 DNS 响应中附加结构化的 EDE 说明信息，帮助现代客户端诊断原因
+ede:
+  enable: true
+
+
+# ------------------------------------------------------------------------------
+# 17. EDNS 客户端子网转发 (ecs - RFC 7871)
+# ------------------------------------------------------------------------------
+# 将客户端所在子网信息附加在向权威 DNS 发起的查询中，获取距离客户端最近的 CDN 节点 IP
+# ecs:
+#   useAsClient: false                         # 收到带 ECS 的请求时，是否将该子网作为统计的客户端 IP
+#   forward: false                             # 是否向上游透传客户端传入的 ECS 信息
+#   ipv4Mask: 24                               # 为没有 ECS 的 IPv4 请求自动附加 /24 子网掩码 (0 禁用)
+#   ipv6Mask: 56                               # 为没有 ECS 的 IPv6 请求自动附加 /56 子网掩码 (0 禁用)
+
+
+# ------------------------------------------------------------------------------
+# 18. 特殊用途域名阻断 (specialUseDomains - SUDN)
+# ------------------------------------------------------------------------------
+# 根据 RFC 6762 等标准，自动拦截不应转发至公网的特殊用途域名 (如 *.local, *.internal)
+specialUseDomains:
+  rfc6762-appendixG: true                      # 自动阻断 .local 等局域网 mDNS 保留后缀
+
+
+# ------------------------------------------------------------------------------
+# 19. DNS64 转换合成 (dns64 - RFC 6147)
+# ------------------------------------------------------------------------------
+# 为纯 IPv6 客户端自动将上游仅有 IPv4 A 记录的域名合成为 AAAA 记录，配合 NAT64 网关使用
+# dns64:
+#   enable: false
+#   prefixes:
+#     - 64:ff9b::/96                           # 标准 Well-Known NAT64 前缀
+
+
+# ------------------------------------------------------------------------------
+# 20. Redis 分布式集群同步 (redis)
+# ------------------------------------------------------------------------------
+# 在多节点部署场景下，通过 Redis 共享 DNS 缓存、拦截状态与阻止事件
+# redis:
+#   address: 192.168.1.10:6379                 # Redis 地址 (亦支持 Unix Socket /var/run/redis.sock)
+#   password: "redis-password"
+#   database: 0
+#   required: false                            # Redis 连不上时是否阻止启动 (false 降级为单机运行)
+#   connectionAttempts: 3
+#   connectionCooldown: 2s
+
+
+# ------------------------------------------------------------------------------
+# 21. 统计与持久化 (statistics) —— blockyx 增强
+# ------------------------------------------------------------------------------
+# 提供给内嵌 Web UI 仪表盘卡片与 24 小时监控图表使用
+statistics:
+  enable: true                                 # 启用统计（必须为 true，UI 仪表盘方可正常展示）
+  persistence:
+    enable: true                               # 启用持久化（将小时统计桶定期写入本地 SQLite）
+    path: /data/blockyx-stats.db               # 重启后 24 小时图表数据不归零
+    retentionDays: 30                          # 历史小时统计保留天数
+    flushInterval: 5m                          # 内存数据刷盘周期
+
+
+# ------------------------------------------------------------------------------
+# 22. 查询日志存储配置 (queryLog) —— Web UI 自动共用！
+# ------------------------------------------------------------------------------
+# 内嵌 Web UI 的查询日志检索、多维度过滤、7d/30d 长周期历史图表及 Top 列表
+# 完全复用此处配置的数据源。只要在此配置好，UI 会自动完成连接，无需二次设置！
+#
+# --- 方案 A: SQLite (推荐：单机/单容器默认开箱即用，UI 完美支持) ---
+queryLog:
+  type: sqlite
+  target: /data/querylog.db                    # 本地路径，不可加 file: 前缀。容器部署挂载 /data 目录
+  retention: 7d                                # 历史记录保留时长 (如 7d, 30d)。0 表示永久保留
+  flushInterval: 30s                           # 内存缓冲批量落盘周期
+
+# --- 方案 B: MySQL / MariaDB (外置关系数据库，多节点共享日志推荐，UI 完美支持) ---
+# queryLog:
+#   type: mysql
+#   # DSN 格式: username:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s
+#   # 注意：parseTime=True 是必需参数，用于 Go 正确解析时间戳
+#   target: "blockyx:password@tcp(192.168.1.10:3306)/blockyx_logs?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s"
+#   retention: 30d
+#   flushInterval: 10s
+
+# --- 方案 C: PostgreSQL (企业级关系数据库，高并发推荐，UI 完美支持) ---
+# queryLog:
+#   type: postgresql
+#   # URI 格式: postgres://username:password@host:port/dbname?sslmode=disable
+#   # 密码亦可通过标准 PGPASSFILE 环境变量注入
+#   target: "postgres://blockyx:password@192.168.1.10:5432/blockyx_logs?sslmode=disable"
+#   retention: 30d
+#   flushInterval: 10s
+
+# --- 方案 D: TimescaleDB (时序数据库，海量历史查询分析，UI 完美支持) ---
+# queryLog:
+#   type: timescale
+#   target: "postgres://blockyx:password@timescale.lan:5432/blockyx_logs?sslmode=disable"
+#   retention: 90d                             # 启动时自动建立 Hypertable，并配置按天自动 Drop Chunk
+#   flushInterval: 10s
+
+# --- 方案 E: CSV (本地按文件大小轮转，无需数据库，UI 完美支持) ---
+# queryLog:
+#   type: csv
+#   target: /logs                              # 日志输出目录
+#   rotation: 100MB                            # 达到 100MB 自动轮转至 2026-10-15_ALL_002.log
+#   retention: 7d                              # 定期按行精准清理过期记录
+
+# --- 方案 F: CSV per Client (按客户端独立分文件存储，UI 完美支持) ---
+# queryLog:
+#   type: csv-client
+#   target: /logs                              # 文件名形如 2026-10-15_<client>_001.log
+#   rotation: 50MB
+#   retention: 14d
+
+# --- 方案 G: Console (输出到容器标准输出 stdout，适合外部日志采集，UI 不支持历史检索) ---
+# queryLog:
+#   type: console
+
+# --- 方案 H: dnstap (Frame Streams 结构化流式协议，面向 SIEM 安全分析，UI 不支持) ---
+# queryLog:
+#   type: dnstap
+#   target: unix:/var/run/dnstap.sock           # 或 tcp://127.0.0.1:6000
+#   flushInterval: 5s
+
+# --- 方案 I: None (彻底关闭查询日志，零开销) ---
+# queryLog:
+#   type: none
+
+
+# ------------------------------------------------------------------------------
+# 23. Prometheus 指标监控 (prometheus)
+# ------------------------------------------------------------------------------
+# 暴露 Prometheus 兼容的指标数据，用于接入 Grafana 等监控仪表盘
+prometheus:
+  enable: true
+  path: /metrics
+
+
+# ------------------------------------------------------------------------------
+# 24. 运行日志 (log)
+# ------------------------------------------------------------------------------
+log:
+  level: info                                  # 日志级别：trace, debug, info, warn, error
+  format: text                                 # 输出格式：text (文本色彩), json (结构化)
+  target: stdout                               # 输出目的地：stdout, stderr, 或 syslog
+  timestamp: true                              # 是否打印时间戳
+  privacy: false                               # 是否脱敏（设为 true 会隐去域名和客户端信息中的字符）
