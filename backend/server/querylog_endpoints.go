@@ -234,8 +234,46 @@ func (s *csvSource) overTime(filter *querylog.Filter, interval time.Duration) ([
 	if err != nil {
 		return nil, err
 	}
+	if filter != nil && !filter.From.IsZero() && !filter.To.IsZero() {
+		start := filter.From.Truncate(interval)
+		end := filter.To.Truncate(interval)
+		if end.Before(start) {
+			end = start
+		}
+
+		items := make([]overTimeBucket, 0)
+		for cur := start; !cur.After(end); cur = cur.Add(interval) {
+			key := cur.Format(time.RFC3339)
+			if b, ok := buckets[key]; ok {
+				items = append(items, *b)
+			} else {
+				items = append(items, overTimeBucket{
+					Time:    key,
+					Total:   0,
+					Blocked: 0,
+					Cached:  0,
+				})
+			}
+		}
+
+		return items, nil
+	}
 
 	sort.Strings(order)
+
+	if len(order) == 1 {
+		ptTime, parseErr := time.Parse(time.RFC3339, order[0])
+		if parseErr == nil {
+			prevKey := ptTime.Add(-interval).Format(time.RFC3339)
+			nextKey := ptTime.Add(interval).Format(time.RFC3339)
+
+			return []overTimeBucket{
+				{Time: prevKey, Total: 0, Blocked: 0, Cached: 0},
+				*buckets[order[0]],
+				{Time: nextKey, Total: 0, Blocked: 0, Cached: 0},
+			}, nil
+		}
+	}
 
 	items := make([]overTimeBucket, 0, len(order))
 	for _, k := range order {

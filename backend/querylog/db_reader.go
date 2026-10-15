@@ -18,7 +18,8 @@ import (
 // DBReader queries query log entries from a database backend
 // (sqlite, mysql, postgresql, timescale).
 type DBReader struct {
-	db *gorm.DB
+	db     *gorm.DB
+	dbType config.QueryLogType
 }
 
 // NewDBReader opens a read-only connection to the query log database.
@@ -55,7 +56,7 @@ func NewDBReader(ctx context.Context, dbType config.QueryLogType, target string)
 		return nil, fmt.Errorf("can't open query log database: %w", err)
 	}
 
-	return &DBReader{db: db}, nil
+	return &DBReader{db: db, dbType: dbType}, nil
 }
 
 // applyFilter adds WHERE clauses for the given filter.
@@ -152,51 +153,129 @@ type OverTimeBucket struct {
 	Cached  int
 }
 
-// OverTime returns per-interval aggregates. The interval is used to truncate
-// timestamps; supported databases all provide a date_trunc-like function via
-// GORM-agnostic SQL below.
+// OverTime returns per-interval aggregates.
 func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket, error) {
-	// Fetch matching rows and bucket in Go: portable across sqlite/mysql/postgres
-	// without dialect-specific date_trunc SQL.
-	var entries []logEntry
-
-	db := r.applyFilter(r.db.Model(&logEntry{}), f).
-		Select("request_ts", "response_type", "reason").
-		Order("request_ts ASC").
-		Find(&entries)
-	if db.Error != nil {
-		return nil, db.Error
+	intervalSec := int64(interval.Seconds())
+	if intervalSec <= 0 {
+		intervalSec = 3600
 	}
 
-	buckets := make(map[string]*OverTimeBucket)
-
-	var order []string
-
-	for i := range entries {
-		rec := toRecord(&entries[i])
-		key := rec.Time.Truncate(interval).Format(time.RFC3339)
-
-		b, ok := buckets[key]
-		if !ok {
-			b = &OverTimeBucket{Time: rec.Time.Truncate(interval)}
-			buckets[key] = b
-			order = append(order, key)
-		}
-
-		b.Total++
-
-		if rec.Blocked() {
-			b.Blocked++
-		}
-
-		if rec.Cached() {
-			b.Cached++
-		}
+	var bucketExpr string
+	switch r.dbType {
+	case config.QueryLogTypeMysql:
+		bucketExpr = fmt.Sprintf("(FLOOR(UNIX_TIMESTAMP(request_ts) / %d) * %d)", intervalSec, intervalSec)
+	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
+		bucketExpr = fmt.Sprintf("(floor(extract(epoch from request_ts) / %d) * %d)", intervalSec, intervalSec)
+	default: // SQLite and others
+		bucketExpr = fmt.Sprintf("(cast(strftime('%%s', request_ts) as integer) / %d) * %d", intervalSec, intervalSec)
 	}
 
-	result := make([]OverTimeBucket, 0, len(order))
-	for _, k := range order {
-		result = append(result, *buckets[k])
+	type overTimeSQLRow struct {
+		BucketSec int64 `gorm:"column:bucket_sec"`
+		Total     int   `gorm:"column:total"`
+		Blocked   int   `gorm:"column:blocked"`
+		Cached    int   `gorm:"column:cached"`
+	}
+
+	var rows []overTimeSQLRow
+	selectClause := fmt.Sprintf("%s AS bucket_sec, COUNT(*) AS total, SUM(CASE WHEN response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%%' THEN 1 ELSE 0 END) AS blocked, SUM(CASE WHEN response_type = 'CACHED' THEN 1 ELSE 0 END) AS cached", bucketExpr)
+	err := r.applyFilter(r.db.Model(&logEntry{}), f).
+		Select(selectClause).
+		Group("bucket_sec").
+		Order("bucket_sec ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	rowMap := make(map[int64]overTimeSQLRow, len(rows))
+	for _, row := range rows {
+		rowMap[row.BucketSec] = row
+	}
+
+	if f != nil && !f.From.IsZero() && !f.To.IsZero() {
+		startSec := (f.From.Unix() / intervalSec) * intervalSec
+		endSec := (f.To.Unix() / intervalSec) * intervalSec
+		if endSec < startSec {
+			endSec = startSec
+		}
+		capacity := int((endSec-startSec)/intervalSec) + 1
+		if capacity > 1000 {
+			capacity = 1000
+		}
+		result := make([]OverTimeBucket, 0, capacity)
+		for sec := startSec; sec <= endSec; sec += intervalSec {
+			t := time.Unix(sec, 0).UTC()
+			if row, ok := rowMap[sec]; ok {
+				result = append(result, OverTimeBucket{
+					Time:    t,
+					Total:   row.Total,
+					Blocked: row.Blocked,
+					Cached:  row.Cached,
+				})
+			} else {
+				result = append(result, OverTimeBucket{
+					Time:    t,
+					Total:   0,
+					Blocked: 0,
+					Cached:  0,
+				})
+			}
+		}
+
+		return result, nil
+	}
+
+	if len(rows) == 0 {
+		return []OverTimeBucket{}, nil
+	}
+
+	if len(rows) == 1 {
+		startSec := rows[0].BucketSec - intervalSec
+		endSec := rows[0].BucketSec + intervalSec
+		result := make([]OverTimeBucket, 0, 3)
+		for sec := startSec; sec <= endSec; sec += intervalSec {
+			t := time.Unix(sec, 0).UTC()
+			if row, ok := rowMap[sec]; ok {
+				result = append(result, OverTimeBucket{
+					Time:    t,
+					Total:   row.Total,
+					Blocked: row.Blocked,
+					Cached:  row.Cached,
+				})
+			} else {
+				result = append(result, OverTimeBucket{
+					Time:    t,
+					Total:   0,
+					Blocked: 0,
+					Cached:  0,
+				})
+			}
+		}
+
+		return result, nil
+	}
+
+	startSec := rows[0].BucketSec
+	endSec := rows[len(rows)-1].BucketSec
+	result := make([]OverTimeBucket, 0, int((endSec-startSec)/intervalSec)+1)
+	for sec := startSec; sec <= endSec; sec += intervalSec {
+		t := time.Unix(sec, 0).UTC()
+		if row, ok := rowMap[sec]; ok {
+			result = append(result, OverTimeBucket{
+				Time:    t,
+				Total:   row.Total,
+				Blocked: row.Blocked,
+				Cached:  row.Cached,
+			})
+		} else {
+			result = append(result, OverTimeBucket{
+				Time:    t,
+				Total:   0,
+				Blocked: 0,
+				Cached:  0,
+			})
+		}
 	}
 
 	return result, nil
@@ -211,78 +290,52 @@ type TopEntry struct {
 
 // Top returns the most frequent domains or clients.
 func (r *DBReader) Top(f *Filter, byClient bool, blockedOnly bool, limit, offset int) ([]TopEntry, int, error) {
-	// Aggregate in Go for portability; the result set is bounded by distinct names.
-	var entries []logEntry
-
-	db := r.applyFilter(r.db.Model(&logEntry{}), f).
-		Select("question_name", "client_ip", "client_name", "response_type", "reason").
-		Find(&entries)
-	if db.Error != nil {
-		return nil, 0, db.Error
+	type topRow struct {
+		Name    string `gorm:"column:name"`
+		Total   int    `gorm:"column:total"`
+		Blocked int    `gorm:"column:blocked"`
 	}
 
-	counts := make(map[string]*TopEntry)
-
-	for i := range entries {
-		rec := toRecord(&entries[i])
-
-		if blockedOnly && !rec.Blocked() {
-			continue
-		}
-
-		name := rec.QuestionName
-		if byClient {
-			name = rec.ClientIP
-			if rec.ClientName != "" {
-				name = rec.ClientName
-			}
-		}
-
-		if name == "" {
-			continue
-		}
-
-		t, ok := counts[name]
-		if !ok {
-			t = &TopEntry{Name: name}
-			counts[name] = t
-		}
-
-		t.Total++
-
-		if rec.Blocked() {
-			t.Blocked++
-		}
+	nameExpr := "question_name"
+	filterCond := "question_name != '' AND question_name IS NOT NULL"
+	if byClient {
+		nameExpr = "COALESCE(NULLIF(client_name, ''), client_ip)"
+		filterCond = "COALESCE(NULLIF(client_name, ''), client_ip) IS NOT NULL AND COALESCE(NULLIF(client_name, ''), client_ip) != ''"
 	}
 
-	items := make([]TopEntry, 0, len(counts))
-	for _, t := range counts {
-		items = append(items, *t)
+	q := r.applyFilter(r.db.Model(&logEntry{}), f).Where(filterCond)
+	if blockedOnly {
+		q = q.Where("response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%'")
 	}
 
-	// Sort by total desc, name asc for stability.
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].Total > items[i].Total ||
-				(items[j].Total == items[i].Total && items[j].Name < items[i].Name) {
-				items[i], items[j] = items[j], items[i]
-			}
-		}
+	var totalDistinct int64
+	err := q.Select("COUNT(DISTINCT " + nameExpr + ")").Row().Scan(&totalDistinct)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	total := len(items)
-
-	if offset > len(items) {
-		offset = len(items)
+	var rows []topRow
+	selectClause := fmt.Sprintf("%s AS name, COUNT(*) AS total, SUM(CASE WHEN response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%%' THEN 1 ELSE 0 END) AS blocked", nameExpr)
+	err = q.Select(selectClause).
+		Group(nameExpr).
+		Order("total DESC, name ASC").
+		Limit(limit).
+		Offset(offset).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, 0, err
 	}
 
-	items = items[offset:]
-
-	if len(items) > limit {
-		items = items[:limit]
+	items := make([]TopEntry, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, TopEntry{
+			Name:    row.Name,
+			Total:   row.Total,
+			Blocked: row.Blocked,
+		})
 	}
 
-	return items, total, nil
+	return items, int(totalDistinct), nil
 }
 
 // Suggestion is a search autocomplete entry.
@@ -293,63 +346,39 @@ type Suggestion struct {
 
 // Search returns distinct names matching the query, most frequent first.
 func (r *DBReader) Search(f *Filter, byClient bool, q string, limit int) ([]Suggestion, error) {
-	sf := *f
+	type searchRow struct {
+		Name  string `gorm:"column:name"`
+		Count int    `gorm:"column:count"`
+	}
+
+	nameExpr := "question_name"
+	filterCond := "question_name != '' AND question_name IS NOT NULL"
+	if byClient {
+		nameExpr = "COALESCE(NULLIF(client_name, ''), client_ip)"
+		filterCond = "COALESCE(NULLIF(client_name, ''), client_ip) IS NOT NULL AND COALESCE(NULLIF(client_name, ''), client_ip) != ''"
+	}
+
+	dbQuery := r.applyFilter(r.db.Model(&logEntry{}), f).Where(filterCond)
 	if q != "" {
-		sf.Search = q
+		dbQuery = dbQuery.Where("LOWER("+nameExpr+") LIKE ?", "%"+strings.ToLower(q)+"%")
 	}
 
-	var entries []logEntry
-
-	db := r.applyFilter(r.db.Model(&logEntry{}), &sf).
-		Select("question_name", "client_ip", "client_name").
-		Find(&entries)
-	if db.Error != nil {
-		return nil, db.Error
+	var rows []searchRow
+	err := dbQuery.Select(nameExpr + " AS name, COUNT(*) AS count").
+		Group(nameExpr).
+		Order("count DESC, name ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
 	}
 
-	counts := make(map[string]int)
-
-	var order []string
-
-	for i := range entries {
-		rec := toRecord(&entries[i])
-
-		name := rec.QuestionName
-		if byClient {
-			name = rec.ClientIP
-			if rec.ClientName != "" {
-				name = rec.ClientName
-			}
-		}
-
-		if name == "" {
-			continue
-		}
-
-		if _, ok := counts[name]; !ok {
-			order = append(order, name)
-		}
-
-		counts[name]++
-	}
-
-	// Most frequent first.
-	for i := 0; i < len(order); i++ {
-		for j := i + 1; j < len(order); j++ {
-			if counts[order[j]] > counts[order[i]] ||
-				(counts[order[j]] == counts[order[i]] && order[j] < order[i]) {
-				order[i], order[j] = order[j], order[i]
-			}
-		}
-	}
-
-	if len(order) > limit {
-		order = order[:limit]
-	}
-
-	items := make([]Suggestion, 0, len(order))
-	for _, name := range order {
-		items = append(items, Suggestion{Name: name, Count: counts[name]})
+	items := make([]Suggestion, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, Suggestion{
+			Name:  row.Name,
+			Count: row.Count,
+		})
 	}
 
 	return items, nil
@@ -363,31 +392,28 @@ type QueryTypeCount struct {
 
 // QueryTypes returns counts grouped by DNS query type.
 func (r *DBReader) QueryTypes(f *Filter) ([]QueryTypeCount, error) {
-	var entries []logEntry
-
-	db := r.applyFilter(r.db.Model(&logEntry{}), f).
-		Select("question_type").
-		Find(&entries)
-	if db.Error != nil {
-		return nil, db.Error
+	type qtypeRow struct {
+		Type  string `gorm:"column:type"`
+		Count int    `gorm:"column:count"`
 	}
 
-	counts := make(map[string]int)
-	for i := range entries {
-		counts[entries[i].QuestionType]++
+	var rows []qtypeRow
+	err := r.applyFilter(r.db.Model(&logEntry{}), f).
+		Where("question_type != '' AND question_type IS NOT NULL").
+		Select("question_type AS type, COUNT(*) AS count").
+		Group("question_type").
+		Order("count DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
 	}
 
-	items := make([]QueryTypeCount, 0, len(counts))
-	for t, c := range counts {
-		items = append(items, QueryTypeCount{Type: t, Count: c})
-	}
-
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].Count > items[i].Count {
-				items[i], items[j] = items[j], items[i]
-			}
-		}
+	items := make([]QueryTypeCount, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, QueryTypeCount{
+			Type:  row.Type,
+			Count: row.Count,
+		})
 	}
 
 	return items, nil

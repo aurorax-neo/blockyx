@@ -264,7 +264,51 @@ export function QueriesOverTimeChart({
       ),
   });
   const { isLoading, isPlaceholderData } = connected;
-  const data = connected.data?.items;
+  const rawData = connected.data?.items;
+  const data = useMemo(() => {
+    if (!rawData || rawData.length === 0) {
+      return rawData;
+    }
+
+    let stepMs = 3_600_000;
+    if (interval.endsWith("m")) {
+      stepMs = Number.parseInt(interval, 10) * 60_000;
+    } else if (interval.endsWith("h")) {
+      stepMs = Number.parseInt(interval, 10) * 3_600_000;
+    } else if (interval.endsWith("d")) {
+      stepMs = Number.parseInt(interval, 10) * 86_400_000;
+    }
+
+    const startMs = Math.floor(Date.parse(from) / stepMs) * stepMs;
+    const endMs = Math.floor(Date.parse(to) / stepMs) * stepMs;
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs >= endMs) {
+      return rawData;
+    }
+
+    const map = new Map<number, (typeof rawData)[number]>();
+    for (const item of rawData) {
+      const ms = Math.floor(Date.parse(item.time) / stepMs) * stepMs;
+      if (!Number.isNaN(ms)) {
+        map.set(ms, item);
+      }
+    }
+
+    const filled: typeof rawData = [];
+    for (let t = startMs; t <= endMs; t += stepMs) {
+      const existing = map.get(t);
+      if (existing) {
+        filled.push(existing);
+      } else {
+        filled.push({
+          time: new Date(t).toISOString(),
+          total: 0,
+          blocked: 0,
+          cached: 0,
+        });
+      }
+    }
+    return filled;
+  }, [rawData, from, to, interval]);
   const showLoading = isLoading || isPlaceholderData;
 
   const clearFilter = useCallback(() => setFilter(null), []);
@@ -360,20 +404,42 @@ export function TrafficChart({
     if (isLoading) {
       return <ChartSkeleton />;
     }
-    if (data?.length === 0) {
+    if (!data || data.length === 0) {
       return (
         <div className="flex h-[220px] items-center justify-center text-muted-foreground text-sm sm:h-[250px]">
           No queries recorded yet.
         </div>
       );
     }
+
+    const first = data[0];
+    const chartData =
+      data.length === 1 && first
+        ? [
+            {
+              ...first,
+              time: new Date(Date.parse(first.time) - 3_600_000).toISOString(),
+              total: 0,
+              blocked: 0,
+              cached: 0,
+            },
+            first,
+            {
+              ...first,
+              time: new Date(Date.parse(first.time) + 3_600_000).toISOString(),
+              total: 0,
+              blocked: 0,
+              cached: 0,
+            },
+          ]
+        : data;
     return (
       <ChartContainer
         config={chartConfig}
         className="h-[220px] min-h-[220px] w-full min-w-0 sm:h-[250px]"
       >
         <AreaChart
-          data={data ?? []}
+          data={chartData}
           margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
         >
           <CartesianGrid strokeDasharray="3 3" vertical={false} />

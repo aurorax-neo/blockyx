@@ -34,7 +34,11 @@ export function aggregateStatisticsTraffic(results: StatisticsResult[]) {
 
   const traffic: typeof points = [];
   const end = Date.parse(last.time);
-  for (let hour = Date.parse(first.time); hour <= end; hour += 3_600_000) {
+  let start = Date.parse(first.time);
+  if (points.length === 1 && !Number.isNaN(end)) {
+    start = end - 23 * 3_600_000;
+  }
+  for (let hour = start; hour <= end; hour += 3_600_000) {
     const time = new Date(hour).toISOString();
     traffic.push(buckets.get(time) ?? { time, total: 0, blocked: 0 });
   }
