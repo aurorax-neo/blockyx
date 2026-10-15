@@ -21,21 +21,52 @@ Web UI 是 Next.js 静态导出，构建时用 `go:embed` 打进二进制。浏�
  6. **统计默认打开，可选落盘。** `statistics.enable` 默认 `true`。`statistics.persistence` 默认关；打开后把小时桶写入 SQLite，重启后仪表盘的 24 小时统计不归零。
  7. **Web UI 用同一个 API key 登录。** key 存在浏览器 `localStorage`（键名 `blockyx_api_key`），没有服务端会话。
 
-## 快速开始
-
 ```bash
-cp config.yml.example config.yml
-# 编辑 DNS 上游、拦截名单，并设置 api.apiKey
+# 1. 下载示例配置文件并按需修改
+curl -o config.yml https://raw.githubusercontent.com/aurorax-neo/blockyx/main/config.yml.example
+# 编辑 DNS 上游、拦截名单，并设置 api.apiKey (或通过环境变量注入)
 
-docker build -t blockyx .
+# 2. 使用官方发布的预编译镜像运行（多架构支持 linux/amd64, linux/arm64）
 docker run -d --name blockyx --restart unless-stopped \
   -p 53:53/udp -p 53:53/tcp \
   -p 4000:4000 \
   -v ./config.yml:/etc/blockyx/config.yml \
   -v blockyx-data:/data \
   -e BLOCKYX_API_KEY="your-secret-key" \
-  blockyx
+  ghcr.io/aurorax-neo/blockyx:latest
 ```
+
+### 也可以使用 Docker Compose 部署
+
+创建 `docker-compose.yml`：
+
+```yaml
+services:
+  blockyx:
+    image: ghcr.io/aurorax-neo/blockyx:latest
+    container_name: blockyx
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "4000:4000/tcp"  # Web UI & REST API
+    environment:
+      - TZ=Asia/Shanghai
+      - BLOCKYX_API_KEY=your-secret-key
+    volumes:
+      - ./config.yml:/etc/blockyx/config.yml
+      - blockyx-data:/data
+
+volumes:
+  blockyx-data:
+```
+
+启动服务：
+```bash
+docker compose up -d
+```
+
+> 注：如需本地自行构建镜像，可在代码根目录执行 `docker build -t blockyx .`。
 
 - 打开 `http://<host>:4000`，输入同一个 API key。
 - `/data` 存放查询日志库和统计库。SQLite WAL 会旁路产生 `-wal` 和 `-shm`，所以要挂目录，不要只挂单个 `.db` 文件，也不要放在 NFS 或 SMB 上。
