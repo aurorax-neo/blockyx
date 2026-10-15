@@ -29,8 +29,8 @@ var _ = Describe("createServers with freeBind", func() {
 	When("freeBind is enabled", func() {
 		It("pre-binds the DNS listeners to a not-yet-available address", func(ctx context.Context) {
 			cfg := &config.Config{
-				Ports: config.Ports{
-					DNS:      config.DNSPortConfig{UDP: config.ListenConfig{nonLocalDNSAddr}},
+				DNS: config.DNSConfig{
+					Port:     config.ListenConfig{nonLocalDNSAddr},
 					FreeBind: true,
 				},
 			}
@@ -60,8 +60,8 @@ var _ = Describe("createServers with freeBind", func() {
 	When("freeBind is disabled", func() {
 		It("does not pre-create listeners (miekg/dns binds at start)", func(ctx context.Context) {
 			cfg := &config.Config{
-				Ports: config.Ports{
-					DNS:      config.DNSPortConfig{UDP: config.ListenConfig{nonLocalDNSAddr}},
+				DNS: config.DNSConfig{
+					Port:     config.ListenConfig{nonLocalDNSAddr},
 					FreeBind: false,
 				},
 			}

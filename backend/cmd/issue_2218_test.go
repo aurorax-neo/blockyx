@@ -29,7 +29,7 @@ var _ = Describe("Healthcheck derives the port from the config (#2218)", func() 
 		DeferCleanup(func() { configPath = old })
 	}
 
-	It("probes the DNS port from ports.dns when no flag is given", func() {
+	It("probes the DNS port from dns.port when no flag is given", func() {
 		ip := "127.0.0.1"
 		port := helpertest.GetStringPort(65111)
 		hostPort := helpertest.GetHostPort(ip, 65111)
@@ -40,7 +40,7 @@ var _ = Describe("Healthcheck derives the port from the config (#2218)", func() 
 			Expect(srv.ListenAndServe()).Should(Succeed())
 		}()
 
-		writeConfig("ports:\n  dns: " + port + "\nupstreams:\n  groups:\n    default:\n      - 1.1.1.1\n")
+		writeConfig("dns:\n  port: " + port + "\nupstreams:\n  groups:\n    default:\n      - 1.1.1.1\n")
 
 		Eventually(func() error {
 			c := NewHealthcheckCommand()
@@ -62,7 +62,7 @@ var _ = Describe("Healthcheck derives the port from the config (#2218)", func() 
 		}()
 
 		// Config points somewhere nothing is listening; the flag must take precedence.
-		writeConfig("ports:\n  dns: 65113\nupstreams:\n  groups:\n    default:\n      - 1.1.1.1\n")
+		writeConfig("dns:\n  port: 65113\nupstreams:\n  groups:\n    default:\n      - 1.1.1.1\n")
 
 		Eventually(func() error {
 			c := NewHealthcheckCommand()
