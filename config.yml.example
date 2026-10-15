@@ -6,12 +6,24 @@
  # 无需为 Web UI 维护独立的配置文件或额外的数据库连接配置。
  #
  # 复制本文件到 config.yml 并挂载至 /etc/blockyx/config.yml 即可使用。
-upstreams:
-  groups:
-    default:
-      - 8.8.8.8
-      - 1.1.1.1
-
+ # 上游 DNS 解析器组 (upstreams)
+ # 支持多种协议：
+ # - 普通 UDP/TCP: 8.8.8.8, 1.1.1.1
+ # - DoT (DNS-over-TLS): tcp-tls:1.1.1.1:853 或 tcp-tls:dns.google:853
+ # - DoH (DNS-over-HTTPS): https://dns.google/dns-query 或 https://cloudflare-dns.com/dns-query
+ # - DoQ (DNS-over-QUIC, RFC 9250): quic:dns.adguard.com 或 quic:94.140.14.14:853
+ upstreams:
+   groups:
+     default:
+       - 8.8.8.8
+       - 1.1.1.1
+       # - tcp-tls:1.1.1.1:853                # DoT 上游
+       # - https://dns.google/dns-query       # DoH 上游
+       # - quic:dns.adguard.com              # DoQ (QUIC) 上游
+   # 可选：QUIC 上游连接微调
+   # quic:
+   #   maxIdleTimeout: 30s
+   #   keepAlivePeriod: 15s
 # Required for the web UI dashboard cards (served at /api/stats).
 # Without this, the UI statistics show "statistics are disabled".
 statistics:
@@ -106,14 +118,37 @@ blocking:
 customDNS:
   mapping:
     router.lan: 192.168.1.1
-
-ports:
-  dns: 53
-  http: 4000
-
-prometheus:
-  enable: true
-  path: /metrics
-
-log:
-  level: info
+ # 监听端口与对外服务配置 (ports)
+ ports:
+   # 普通 DNS (UDP/TCP 53)
+   dns: 53
+ 
+   # HTTP 端口 (Web UI、REST API、Prometheus 指标): 默认 4000
+   http: 4000
+ 
+   # --- 对外提供 DoT (DNS-over-TLS) 服务 ---
+   # 客户端 (如 Android 原生“私人 DNS”) 可以连接到此端口
+   # 启用时需要配置下面的 certFile 与 keyFile (未配置时自动生成自签名证书)
+   # tls: 853
+ 
+   # --- 对外提供 DoH (DNS-over-HTTPS) 服务 ---
+   # 浏览器、iOS/macOS 可使用 https://<host>:443/dns-query 进行安全加密解析
+   # https: 443
+   # dohPath: /dns-query  # 可选：自定义查询路径，默认 /dns-query
+ 
+ # TLS 证书配置 (用于对外提供 DoT、DoH、HTTPS 以及 Web UI HTTPS)
+ # certFile: /etc/blockyx/cert.pem
+ # keyFile: /etc/blockyx/key.pem
+ 
+ # --- 对外提供基于 QUIC 的 DNS 服务 (DoH3 / HTTP/3) ---
+ # 当启用且 ports.https 已配置时，在相同的 UDP 端口 (如 443) 启用 HTTP/3 (QUIC) 监听
+ # 客户端支持通过 QUIC 传输层向 /dns-query 发起 DoH 查询 (DoH3)
+ # http3:
+ #   enable: true
+ 
+ prometheus:
+   enable: true
+   path: /metrics
+ 
+ log:
+   level: info

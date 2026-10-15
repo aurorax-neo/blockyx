@@ -121,6 +121,53 @@ api:
  #   rotation: 100MB
  #   retention: 7d
  ```
+ 
+ ### 加密 DNS 服务 (DoT / DoH / QUIC) 与上游
+ 
+ blockyx 同时支持**对外提供加密 DNS 监听**以及**向上游发起加密 DNS 解析**：
+ 
+ #### 1. 对外提供加密 DNS 服务（服务端 Inbound）
+ 
+ | 协议 | 监听端口配置 | 依赖项 | 客户端使用方式 |
+ | --- | --- | --- | --- |
+ | **DoT** (DNS-over-TLS) | `ports.tls: 853` | 需配置 `certFile` 与 `keyFile` (默认自签) | Android 原生“私人 DNS”、iOS 描述文件、`kdig -d @host +tls` |
+ | **DoH** (DNS-over-HTTPS) | `ports.https: 443` | 需配置 `certFile` 与 `keyFile` | 浏览器 (Chrome/Firefox/Edge)、`https://<host>:443/dns-query` |
+ | **DoH3 / QUIC** (HTTP/3) | `http3.enable: true` | 需配置 `ports.https` (UDP 443 传输) | 现代支持 HTTP/3 QUIC 的 DoH 客户端，抗弱网丢包 |
+ 
+ 配置示例：
+ 
+ ```yaml
+ ports:
+   dns: 53                  # 普通 DNS
+   http: 4000               # Web UI 与 REST API
+   tls: 853                 # 开启 DoT 监听
+   https: 443               # 开启 DoH (以及 HTTPS Web UI)
+   dohPath: /dns-query      # DoH 查询路径
+ 
+ certFile: /etc/blockyx/cert.pem
+ keyFile: /etc/blockyx/key.pem
+ 
+ http3:
+   enable: true             # 在 UDP 443 开启 HTTP/3 (QUIC) DoH3 服务
+ ```
+ 
+ #### 2. 作为客户端请求上游解析（上游 Outbound）
+ 
+ 在 `upstreams.groups` 中支持以下格式：
+ 
+ ```yaml
+ upstreams:
+   groups:
+     default:
+       - 1.1.1.1                               # 普通 UDP/TCP
+       - tcp-tls:1.1.1.1:853                   # DoT (DNS-over-TLS)
+       - https://dns.google/dns-query          # DoH (DNS-over-HTTPS)
+       - quic:dns.adguard.com                  # DoQ (DNS-over-QUIC, RFC 9250)
+   quic:
+     maxIdleTimeout: 30s
+     keepAlivePeriod: 15s
+ ```
+
 
 统计持久化只恢复最近 24 小时的小时桶，供 `/api/stats` 和仪表盘卡片使用。7 天、30 天曲线和可筛选的 Top 列表来自查询日志，不是这张统计表。`kill -9` 最多丢掉一个 `flushInterval` 内尚未刷盘的当前小时桶。
 
