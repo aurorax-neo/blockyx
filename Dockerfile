@@ -3,7 +3,7 @@
 #   -p 4000:4000 -v ./config.yml:/etc/blockyx/config.yml blockyx
 
 # ---------- web UI builder (static export) ----------
-FROM node:24-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 WORKDIR /build/frontend
 ARG BUN_VERSION=1.4.2
 RUN apk add --no-cache g++ make python3 \
@@ -14,21 +14,21 @@ COPY frontend/ ./
 RUN bun run build
 
 # ---------- Go builder ----------
-FROM golang:1.26.2-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.2-alpine AS go-builder
 WORKDIR /build/backend
 ARG VERSION=dev
+ARG TARGETOS
 ARG TARGETARCH
+ARG TARGETVARIANT
 RUN apk add --no-cache git ca-certificates
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
 # Embed the statically exported UI into the binary.
 COPY --from=frontend-builder /build/frontend/out ./web/ui-out
-RUN CGO_ENABLED=0 go build -trimpath \
-  -ldflags="-s -w -X github.com/0xERR0R/blocky/util.Version=${VERSION} -X github.com/0xERR0R/blocky/util.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/0xERR0R/blocky/util.Architecture=${TARGETARCH}" \
-  -o /blockyx . \
-  && /blockyx --version
-
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} go build -trimpath \
+  -ldflags="-s -w -X github.com/0xERR0R/blocky/util.Version=${VERSION} -X github.com/0xERR0R/blocky/util.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/0xERR0R/blocky/util.Architecture=${TARGETARCH}${TARGETVARIANT}" \
+  -o /blockyx .
 # ---------- runner ----------
 FROM alpine:3.24
 WORKDIR /app

@@ -4,17 +4,169 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
-  docker:
+  build-frontend:
+    name: Build Frontend UI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Build static export
+        working-directory: frontend
+        run: bun run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/out/
+          retention-days: 1
+
+  build-binaries:
+    name: Build Binary (${{ matrix.os }}/${{ matrix.arch }}${{ matrix.arm && format('v{0}', matrix.arm) || '' }})
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: linux
+            arch: arm
+            arm: 7
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: backend/web/ui-out
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.2"
+          cache-dependency-path: backend/go.sum
+
+      - name: Build binary
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.arm }}
+          CGO_ENABLED: "0"
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          [ "$TAG_NAME" = "" ] || [ "$TAG_NAME" = "main" ] && TAG_NAME="dev"
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ARCH_LABEL="${{ matrix.arch }}${{ matrix.arm }}"
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            EXT=".exe"
+          fi
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/0xERR0R/blocky/util.Version=${TAG_NAME} -X github.com/0xERR0R/blocky/util.BuildTime=${BUILD_TIME} -X github.com/0xERR0R/blocky/util.Architecture=${ARCH_LABEL}" \
+            -o "dist/blockyx${EXT}" .
+
+      - name: Package archive
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          [ "$TAG_NAME" = "" ] || [ "$TAG_NAME" = "main" ] && TAG_NAME="dev"
+          ARCH_SUFFIX="${{ matrix.arch }}${{ matrix.arm && format('v{0}', matrix.arm) || '' }}"
+          PKG_NAME="blockyx_${TAG_NAME}_${{ matrix.os }}_${ARCH_SUFFIX}"
+          mkdir -p release-packages
+          
+          # 收集随行文档
+          cp config.yml.example backend/dist/
+          cp README.md backend/dist/
+          cp LICENSE backend/dist/ 2>/dev/null || true
+          
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            cd backend/dist
+            zip -9 -r "../../release-packages/${PKG_NAME}.zip" .
+          else
+            cd backend/dist
+            tar -czvf "../../release-packages/${PKG_NAME}.tar.gz" .
+          fi
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.arm && format('v{0}', matrix.arm) || '' }}
+          path: release-packages/*
+          retention-days: 1
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+          pattern: package-*
+          merge-multiple: true
+
+      - name: Generate Checksums
+        run: |
+          mkdir -p release-assets
+          cp downloaded-artifacts/* release-assets/
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  docker:
+    name: Publish Multi-arch Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -40,6 +192,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
