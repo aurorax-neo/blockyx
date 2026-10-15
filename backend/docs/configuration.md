@@ -1113,12 +1113,12 @@ use this feature, the HTTP listener must be enabled (see [Basic Configuration](#
 
 The endpoint returns curated totals (`summary`), raw per-type breakdowns (response type, query type
 and response code), a per-hour time series, top-20 domains / blocked-domains / clients, and current
-list and cache gauges. Disabled by default; when disabled,
-`GET /api/stats` returns HTTP 503.
+list and cache gauges. Enabled by default in blockyx. Set `statistics.enable: false`
+to turn collection off; `GET /api/stats` then returns HTTP 503.
 
 | Parameter         | Mandatory | Default value | Description                                                       |
 | ----------------- | --------- | ------------- | ----------------------------------------------------------------- |
-| statistics.enable | no        | false         | If true, enables in-memory statistics and the /api/stats endpoint |
+| statistics.enable | no        | true          | If true, enables in-memory statistics and the /api/stats endpoint |
 
 !!! example
 
@@ -1127,7 +1127,7 @@ list and cache gauges. Disabled by default; when disabled,
       enable: true
     ```
 
-### Statistics persistence (blockyx extension)
+### Statistics persistence
 
 By default the statistics above live only in memory: a restart resets every
 dashboard card to zero. When `statistics.persistence` is enabled, closed hourly
@@ -1167,16 +1167,22 @@ reloaded on startup — the dashboard survives restarts.
     [rate limiter](#rate-limiting-per-client-ip) are always attributed to the client IP: the limiter
     runs before the client name lookup, so that its bucket key stays the connection's source IP.
 
-## API authentication (blockyx extension)
+## API authentication
 
-When `api.apiKey` is set, every `/api/*` request must carry the key, either as
-`X-API-Key` header or as `Authorization: Bearer <key>` header. Requests without a
-valid key get HTTP `401`. Empty (default) disables authentication.
-The `BLOCKYX_API_KEY` environment variable takes precedence over the config file value.
+The blockyx process always authenticates `/api/*` and `/debug` (pprof) with the same key.
+Send the key as an `X-API-Key` header or as `Authorization: Bearer <key>`.
+Requests without a valid key get HTTP `401`. `BLOCKYX_API_KEY` overrides `api.apiKey`.
+The CLI commands `blocking`, `lists`, `cache`, `query` and `stats` send that key.
+`/metrics` stays unauthenticated.
+When both sources are empty, blockyx generates a random key, writes only the
+`api.apiKey` line into that one config file, and prints the key to stderr.
+Comments, order and the rest of the file stay as they were. If the config path
+is a directory, read-only, or otherwise cannot be updated, the file is left
+unchanged and stderr says the generated key is valid for this process only.
 
-| Parameter  | Mandatory | Default value | Description                                                              |
-| ---------- | --------- | ------------- | ------------------------------------------------------------------------ |
-| api.apiKey | no        |               | API key required for `/api/*`; supports `file:` prefix like other secrets |
+| Parameter  | Mandatory | Default value | Description                                                                 |
+| ---------- | --------- | ------------- | --------------------------------------------------------------------------- |
+| api.apiKey | no        | generated     | Key required for `/api/*` and `/debug`. Empty means "generate one". Not optional at runtime. |
 
 !!! example
 
@@ -1220,28 +1226,28 @@ http3:
   enable: true
 ```
 
-## Query logging
-
-You can enable the logging of DNS queries (question, answer, client, duration etc.) to a daily CSV file (can be opened
-in Excel or OpenOffice Calc) or MySQL/MariaDB database.
+Query logging records DNS questions, answers, clients and duration.
+In blockyx the default target is a local SQLite file, not the console and not a daily CSV.
 
 !!! warning
 
-    Query file/database contains sensitive information. Please ensure to inform users, if you log their queries.
+    The log file or database contains sensitive information. Tell users when you log their queries.
 
 ### Query log types
 
-You can select one of following query log types:
+Select one of the following query log types:
 
-- `mysql`: log each query in the external MySQL/MariaDB database
-- `postgresql`: log each query in the external PostgreSQL database
-- `timescale`: log each query in the external Timescale database
-- `sqlite`: log each query in a local SQLite database file (no external DB needed)
-- `csv`: log into CSV file (one per day)
-- `csv-client`: log into CSV file (one per day and per client)
-- `console`: log into console output
-- `dnstap`: export client DNS query/response events via [dnstap](https://dnstap.info/) (Frame Streams over Unix socket or TCP)
-- `none`: do not log any queries
+- `mysql`: each query in an external MySQL/MariaDB database
+- `postgresql`: each query in an external PostgreSQL database
+- `timescale`: each query in an external Timescale database
+- `sqlite`: a local SQLite file. This is the blockyx default when `type` is omitted
+- `csv`: CSV files in a directory, rotated by size
+- `csv-client`: the same, with a separate sequence per client
+- `console`: write to standard output. This must be set explicitly; omitting `type` does not select it
+- `dnstap`: export client query/response events via [dnstap](https://dnstap.info/) (Frame Streams over a Unix socket or TCP)
+- `none`: do not log queries
+
+If the selected writer cannot be created, blockyx retries (`creationAttempts`, default 3, spaced by `creationCooldown`, default 2s) and then exits. The process does not start and does not fall back to `console`.
 
 #### SQLite query log
 
@@ -1262,7 +1268,7 @@ Blocky opens the database in **WAL (Write-Ahead Logging) mode** automatically; y
 
 WAL requires a normal local filesystem. It is **not** supported on network filesystems (NFS, SMB/CIFS); placing the database on a network share can cause lock errors or corruption, so use local/block storage.
 
-Retention (`logRetentionDays`) works the same as for the other database targets: entries older than the limit are deleted. Note that SQLite does not hand freed space back to the operating system on its own, so the `.db` file does not shrink after a deletion — the space is reused for new entries. Run `VACUUM` manually if you need to reclaim disk space.
+Retention (`queryLog.retention`, a duration such as `7d`; `0` disables cleanup) deletes entries older than the limit. SQLite does not return freed pages to the operating system, so the `.db` file does not shrink after a deletion; the space is reused. Run `VACUUM` manually to reclaim it.
 
 ##### Reading the SQLite query log from external tools
 
@@ -1283,7 +1289,7 @@ Set `queryLog.target` to:
 - `tcp://127.0.0.1:6000` — TCP listener
 - `/var/run/dnstap.sock` — bare path, treated as Unix socket
 
-`queryLog.fields` and `queryLog.logRetentionDays` do not apply (streaming export, not stored rows/files). `queryLog.flushInterval` controls socket write batching.
+`queryLog.fields` and `queryLog.retention` do not apply (streaming export, not stored rows or files). `queryLog.flushInterval` controls socket write batching.
 
 !!! note
     dnstap exports full DNS messages. `log.privacy` obfuscation does not apply to dnstap payloads.
@@ -1311,16 +1317,16 @@ Configuration parameters:
 
 | Parameter                 | Type                                                                                 | Mandatory | Default value | Description                                                                                   |
 | ------------------------- | ------------------------------------------------------------------------------------ | --------- | ------------- | --------------------------------------------------------------------------------------------- |
-| queryLog.type             | enum (mysql, postgresql, timescale, sqlite, csv, csv-client, console, dnstap, none (see above)) | no        |               | Type of logging target. Console if empty                                                      |
-| queryLog.target           | string                                                                               | no        |               | directory for writing the logs (for csv), database file path (for sqlite), database url (for mysql, postgresql or timescale), or dnstap socket address (`unix:…`, `tcp://…`, or bare `/path`); supports `file:` for database URLs — see [Redis tip](#redis) |
-| queryLog.logRetentionDays | int                                                                                  | no        | 0             | if > 0, deletes log files/database entries which are older than ... days; not used for dnstap   |
-| queryLog.creationAttempts | int                                                                                  | no        | 3             | Max attempts to create specific query log writer                                              |
-| queryLog.creationCooldown | duration format                                                                      | no        | 2s            | Time between the creation attempts                                                            |
-| queryLog.fields           | list enum (clientIP, clientName, responseReason, responseAnswer, question, duration) | no        | all           | which information should be logged; ignored for dnstap                                        |
-| queryLog.flushInterval    | duration format                                                                      | no        | 30s           | Interval to write buffered entries in bulk to the database (mysql/postgresql/timescale/sqlite) or dnstap socket batching |
-| queryLog.ignore.sudn      | bool                                                                                 | no        | false         | if true, queries answered as Special Use Domain Names (SUDN) are not logged                   |
-| queryLog.ignore.domains   | list of string                                                                       | no        |               | domains excluded from the query log; each entry is matched against the query name as an exact domain, a `*.wildcard`, or a `/regex/` |
-| queryLog.rotation         | enum (daily, hourly, minutely)                                                       | no        | daily         | **blockyx extension:** time granularity of CSV log files (`csv`/`csv-client` only): `daily` → `2006-01-02_ALL.log`, `hourly` → `2006-01-02_15_ALL.log`, `minutely` → `2006-01-02_15-04_ALL.log` |
+| queryLog.type             | enum (mysql, postgresql, timescale, sqlite, csv, csv-client, console, dnstap, none) | no        | sqlite        | Logging target. Omitted or the zero value becomes sqlite at `/data/querylog.db`. `none` disables logging. |
+| queryLog.target           | string                                                                               | no        | `/data/querylog.db` for sqlite | CSV directory, SQLite file path, database URL, or dnstap socket (`unix:…`, `tcp://…`, or a bare `/path`). Do not prefix a SQLite path with `file:`; that prefix means "read the target string from this file". |
+| queryLog.retention        | duration                                                                             | no        | 0             | Delete log files or database rows older than this duration (`7d`, `168h`). `0` disables cleanup. Not used for dnstap. |
+| queryLog.creationAttempts | int                                                                                  | no        | 3             | Max attempts to create the query log writer                                              |
+| queryLog.creationCooldown | duration                                                                             | no        | 2s            | Delay between creation attempts                                                            |
+| queryLog.fields           | list enum (clientIP, clientName, responseReason, responseAnswer, question, duration) | no        | all           | Which information is logged. Ignored for dnstap                                        |
+| queryLog.flushInterval    | duration                                                                             | no        | 30s           | How often buffered entries are written to mysql, postgresql, timescale, sqlite, or a dnstap socket |
+| queryLog.ignore.sudn      | bool                                                                                 | no        | false         | If true, queries answered as Special Use Domain Names are not logged                   |
+| queryLog.ignore.domains   | list of string                                                                       | no        |               | Domains excluded from the log. Each entry is an exact domain, a `*.wildcard`, or a `/regex/` |
+| queryLog.rotation         | size (`100MB`, `1GB`)                                                                | no        | 100MB         | Max size of one CSV or csv-client file before the next `_NNN` file is opened. Ignored by other types. |
 
 !!! hint
 
@@ -1351,7 +1357,7 @@ Parsing is handled not by Blocky, but third-party libraries, therefore the full 
     queryLog:
       type: csv
       target: /logs
-      logRetentionDays: 7
+      retention: 7d
       fields:
       - clientIP
       - duration
@@ -1365,7 +1371,7 @@ Parsing is handled not by Blocky, but third-party libraries, therefore the full 
     queryLog:
       type: mysql
       target: 'username:password@tcp(localhost:3306)/blocky_query_log?charset=utf8mb4&parseTime=True&loc=Local&timeout=15s'
-      logRetentionDays: 7
+      retention: 7d
     ```
 
 !!! example

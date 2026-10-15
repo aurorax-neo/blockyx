@@ -1,17 +1,17 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
-
-	"gopkg.in/yaml.v2"
 
 	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/evt"
@@ -65,13 +65,17 @@ func generateAPIKey() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// persistAPIKey writes the generated API key back to the config file
-// (0600 permissions) so it survives restarts. Returns nil when the
-// config path is empty or the file can't be updated — the caller
-// should still print the key to stderr in that case.
+// persistAPIKey writes key into the single config file without reordering or
+// dropping the rest of the file, including comments. A directory, a missing
+// path, or a file that cannot be updated is left unchanged.
 func persistAPIKey(configPath, key string) error {
-	if configPath == "" {
-		return fmt.Errorf("no config file path")
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("config path %s is a directory", configPath)
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -79,32 +83,135 @@ func persistAPIKey(configPath, key string) error {
 		return err
 	}
 
-	var cfg map[interface{}]interface{}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
+	updated := insertAPIKey(data, key)
 
-	if cfg == nil {
-		cfg = make(map[interface{}]interface{})
-	}
-
-	api, ok := cfg["api"].(map[interface{}]interface{})
-	if !ok {
-		api = make(map[interface{}]interface{})
-		cfg["api"] = api
-	}
-
-	api["apiKey"] = key
-
-	out, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(configPath, out, 0600)
+	return os.WriteFile(configPath, updated, info.Mode().Perm())
 }
 
-func warnMissingPrivilegedPortCapability(ports config.Ports) {	effective, err := raiseNetBindService()
+// insertAPIKey sets api.apiKey in a YAML document. Other lines stay in place.
+func insertAPIKey(data []byte, key string) []byte {
+	newline := "\n"
+	if bytes.Contains(data, []byte("\r\n")) {
+		newline = "\r\n"
+	}
+
+	text := string(data)
+	trailingNewline := text == "" || strings.HasSuffix(text, newline)
+	lines := strings.Split(text, newline)
+	quoted := strconv.Quote(key)
+
+	apiAt := -1
+
+	for i, line := range lines {
+		if yamlKey(line) == "api" {
+			apiAt = i
+
+			break
+		}
+	}
+
+	if apiAt < 0 {
+		lines = appendYAML(lines, trailingNewline, "api:", "  apiKey: "+quoted)
+
+		return joinYAML(lines, newline, trailingNewline || text == "")
+	}
+
+	sectionEnd := len(lines)
+	childIndent := ""
+	keyAt := -1
+
+	for i := apiAt + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		indent := yamlIndent(lines[i])
+		if len(indent) <= len(yamlIndent(lines[apiAt])) {
+			sectionEnd = i
+
+			break
+		}
+
+		if childIndent == "" {
+			childIndent = indent
+		}
+
+		if yamlKey(lines[i]) == "apiKey" {
+			keyAt = i
+			childIndent = indent
+
+			break
+		}
+	}
+
+	if childIndent == "" {
+		childIndent = yamlIndent(lines[apiAt]) + "  "
+	}
+
+	replacement := childIndent + "apiKey: " + quoted
+	if keyAt >= 0 {
+		lines[keyAt] = replacement
+	} else {
+		lines = insertYAMLLine(lines, apiAt+1, replacement)
+		_ = sectionEnd
+	}
+
+	return joinYAML(lines, newline, trailingNewline)
+}
+
+func yamlIndent(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+}
+
+func yamlKey(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+
+	name, _, found := strings.Cut(trimmed, ":")
+	if !found || name == "" || strings.ContainsAny(name, " \t#") {
+		return ""
+	}
+
+	return name
+}
+
+func insertYAMLLine(lines []string, index int, line string) []string {
+	if index < 0 || index > len(lines) {
+		return append(lines, line)
+	}
+
+	lines = append(lines, "")
+	copy(lines[index+1:], lines[index:])
+	lines[index] = line
+
+	return lines
+}
+
+func appendYAML(lines []string, trailing bool, section ...string) []string {
+	if trailing && len(lines) > 0 && lines[len(lines)-1] == "" {
+		head := append([]string{}, lines[:len(lines)-1]...)
+		head = append(head, section...)
+
+		return append(head, "")
+	}
+
+	return append(lines, section...)
+}
+
+func joinYAML(lines []string, newline string, trailing bool) []byte {
+	out := strings.Join(lines, newline)
+	if trailing && !strings.HasSuffix(out, newline) {
+		out += newline
+	}
+
+	return []byte(out)
+}
+
+func warnMissingPrivilegedPortCapability(ports config.Ports) {
+	effective, err := raiseNetBindService()
 	if err != nil {
 		if privileged := ports.PrivilegedPorts(); len(privileged) > 0 {
 			log.Log().Warnf("could not adjust process capabilities (%v); binding "+

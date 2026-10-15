@@ -14,10 +14,10 @@ To print runtime configuration / statistics, you can send `SIGUSR1` signal to ru
     INFO server:      singleNameOrder = "[2 1]"
     INFO server:      externalResolver = "upstream 'tcp+udp:192.168.178.1:53'"
     INFO server:      cache item count = 7
-    INFO server: -> resolver: 'QueryLoggingResolver'
-    INFO server:      logDir= "/logs"
-    INFO server:      perClient = false
-    INFO server:      logRetentionDays= 7
+    INFO server: -> query_logging:
+    INFO server:      type: sqlite
+    INFO server:      target: /data/querylog.db
+    INFO server:      retention: 168 hours
     INFO server: -> resolver: 'MetricsResolver'
     INFO server:      metrics:
     INFO server:        Enable = true
@@ -37,7 +37,7 @@ To print runtime configuration / statistics, you can send `SIGUSR1` signal to ru
 
 !!! hint
 
-    To send a signal to a process you can use `kill -s USR1 <PID>` or `docker kill -s SIGUSR1 blocky` for docker setup
+    To send a signal to a process you can use `kill -s USR1 <PID>` or `docker kill -s SIGUSR1 blockyx` for a blockyx container.
 
 ## Debug / Profiling
 
@@ -93,28 +93,7 @@ This is only a small excerpt of all free available DNS servers and should only b
 * [Quad9](https://www.quad9.net/)
 * [UncensoredDNS](https://blog.uncensoreddns.org/dns-servers/)
 
-## Project links
+## References
 
-### Code repository
-
-Main: [:material-github:GitHub](https://github.com/0xERR0R/blocky)
-
-Mirror: [:simple-codeberg:Codeberg](https://codeberg.org/0xERR0R/blocky)
-
-### Container Registry
-
-Main: [:material-docker:Docker Hub](https://hub.docker.com/r/spx01/blocky)
-
-Mirror: [:material-github:GitHub Container Registry](https://ghcr.io/0xerr0r/blocky)
-
-## Developer Information
-
-### Docker Images
-
-To enable Docker image creation on a GitHub fork create a secret with the name `DEVELOPMENT_DOCKER` and the value `true`.
-This will trigger a workflow on every push of a branch starting with `fb-` and create an image with the branch name.
-
-### Automatic fork sync
-
-To enable automatic fork synchronisation create a secret with the name `FORK_SYNC_TOKEN` with an access token that has write permission to the fork repository.
-The enabled workflow will sync the main branch every 30 minutes with its upstream.
+- DNS server: [blocky](https://github.com/0xERR0R/blocky)
+- Web UI: [blocky-ui](https://github.com/GabeDuarteM/blocky-ui)

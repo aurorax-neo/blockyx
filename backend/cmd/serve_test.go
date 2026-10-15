@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	basePort = 5000
+	basePort = 52000
 )
 
 var _ = Describe("Serve command", func() {
@@ -38,6 +38,8 @@ var _ = Describe("Serve command", func() {
 					"      - 1.1.1.1",
 					"ports:",
 					"  dns: "+port,
+					"queryLog:",
+					"  type: none",
 					"api:",
 					"  apiKey: \"test-key\"")
 
@@ -87,6 +89,8 @@ var _ = Describe("Serve command", func() {
 					"      - 1.1.1.1",
 					"ports:",
 					"  dns: "+port,
+					"queryLog:",
+					"  type: none",
 					"api:",
 					"  apiKey: \"test-key\"")
 
@@ -139,7 +143,9 @@ var _ = Describe("Serve command", func() {
 					"    default:",
 					"      - 1.1.1.1",
 					"ports:",
-					"  dns: "+port)
+					"  dns: "+port,
+					"queryLog:",
+					"  type: none")
 
 				os.Setenv(configFileEnvVar, cfgFile.Path)
 				DeferCleanup(func() { os.Unsetenv(configFileEnvVar) })

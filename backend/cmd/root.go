@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ var (
 	configPath string
 	apiHost    string
 	apiPort    uint16
+	apiKey     string
 	dnsHost    = defaultIPAddress
 	dnsPort    = uint16(defaultDNSPort)
 )
@@ -69,9 +71,21 @@ func apiURL() string {
 	return fmt.Sprintf("http://%s%s", net.JoinHostPort(apiHost, strconv.Itoa(int(apiPort))), "/api")
 }
 
-// newAPIClient creates a new API client with the configured URL
+// newAPIClient creates an API client for this host.
+// blocking, lists, cache, query and stats all use it, and it sends the key from
+// the config file or BLOCKYX_API_KEY as X-API-Key.
 func newAPIClient() (*api.ClientWithResponses, error) {
-	client, err := api.NewClientWithResponses(apiURL())
+	options := make([]api.ClientOption, 0, 1)
+	if apiKey != "" {
+		key := apiKey
+		options = append(options, api.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			req.Header.Set("X-API-Key", key)
+
+			return nil
+		}))
+	}
+
+	client, err := api.NewClientWithResponses(apiURL(), options...)
 	if err != nil {
 		return nil, fmt.Errorf("can't create client: %w", err)
 	}
@@ -84,6 +98,8 @@ func initConfigPreRun(cmd *cobra.Command, args []string) error {
 }
 
 func initConfig() error {
+	apiKey = ""
+
 	if configPath == defaultConfigPath {
 		val, present := os.LookupEnv(configFileEnvVar)
 		if present {
@@ -138,6 +154,11 @@ func initConfig() error {
 		}
 
 		dnsPort = port
+	}
+
+	apiKey = cfg.API.APIKey.Reveal()
+	if envKey := os.Getenv("BLOCKYX_API_KEY"); envKey != "" {
+		apiKey = envKey
 	}
 
 	return nil

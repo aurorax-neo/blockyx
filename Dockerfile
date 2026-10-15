@@ -44,14 +44,18 @@ RUN apk add --no-cache ca-certificates su-exec libcap \
 COPY --from=go-builder /blockyx ./blockyx
 COPY config.yml.example ./config.yml.example
 COPY entrypoint.sh ./entrypoint.sh
-# Allow non-root blockyx user to bind privileged ports (53) — conventional
-# Docker approach, works with --net=host too.
-RUN setcap 'cap_net_bind_service=+ep' ./blockyx \
+# File capability is permitted, not effective. The process raises it when the
+# runtime still allows CAP_NET_BIND_SERVICE. +ep can be rejected by a runtime
+# that drops every capability before exec.
+RUN setcap 'cap_net_bind_service=+p' ./blockyx \
   && chmod +x entrypoint.sh \
   && chown blockyx:blockyx ./blockyx ./entrypoint.sh
 
 EXPOSE 53/udp 53/tcp 4000
 
 ENV BLOCKYX_CONFIG=/etc/blockyx/config.yml
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ./blockyx --config "$BLOCKYX_CONFIG" healthcheck
 
 ENTRYPOINT ["./entrypoint.sh"]

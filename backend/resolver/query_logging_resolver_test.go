@@ -41,13 +41,14 @@ func (m *SlowMockWriter) CleanUp() {
 
 var _ = Describe("QueryLoggingResolver", func() {
 	var (
-		sut        *QueryLoggingResolver
-		sutConfig  config.QueryLog
-		err        error
-		m          *mockResolver
-		tmpDir     *TmpFolder
-		mockRType  ResponseType
-		mockAnswer *dns.Msg
+		sut                *QueryLoggingResolver
+		sutConfig          config.QueryLog
+		err                error
+		allowWriterFailure bool
+		m                  *mockResolver
+		tmpDir             *TmpFolder
+		mockRType          ResponseType
+		mockAnswer         *dns.Msg
 
 		ctx      context.Context
 		cancelFn context.CancelFunc
@@ -65,6 +66,8 @@ var _ = Describe("QueryLoggingResolver", func() {
 
 		sutConfig, err = config.WithDefaults[config.QueryLog]()
 		Expect(err).Should(Succeed())
+		sutConfig.Type = config.QueryLogTypeConsole
+		allowWriterFailure = false
 
 		mockRType = ResponseTypeRESOLVED
 		mockAnswer = new(dns.Msg)
@@ -77,6 +80,10 @@ var _ = Describe("QueryLoggingResolver", func() {
 		}
 
 		sut, err = NewQueryLoggingResolver(ctx, sutConfig)
+		if allowWriterFailure {
+			return
+		}
+
 		Expect(err).Should(Succeed())
 
 		m = &mockResolver{
@@ -110,6 +117,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 		When("Resolver has no configuration", func() {
 			BeforeEach(func() {
 				sutConfig = config.QueryLog{
+					Type:             config.QueryLogTypeNone,
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
@@ -261,7 +269,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				By("check log for client1", func() {
 					Eventually(func(g Gomega) {
 						csvLines, err := readCsv(tmpDir.JoinPath(
-							time.Now().Format("2006-01-02") + "_client1.log"))
+							time.Now().Format("2006-01-02") + "_client1_001.log"))
 
 						g.Expect(err).Should(Succeed())
 						g.Expect(csvLines).ShouldNot(BeEmpty())
@@ -279,7 +287,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				By("check log for client2", func() {
 					Eventually(func(g Gomega) {
 						csvLines, err := readCsv(tmpDir.JoinPath(
-							time.Now().Format("2006-01-02") + "_cl_ient2_test.log"))
+							time.Now().Format("2006-01-02") + "_cl_ient2_test_001.log"))
 
 						g.Expect(err).Should(Succeed())
 						g.Expect(csvLines).Should(HaveLen(1))
@@ -328,7 +336,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				By("check log", func() {
 					Eventually(func(g Gomega) {
 						csvLines, err := readCsv(tmpDir.JoinPath(
-							time.Now().Format("2006-01-02") + "_ALL.log"))
+							time.Now().Format("2006-01-02") + "_ALL_001.log"))
 
 						g.Expect(err).Should(Succeed())
 						g.Expect(csvLines).Should(HaveLen(2))
@@ -363,6 +371,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 					Fields:           []config.QueryLogField{config.QueryLogFieldClientIP},
+					Rotation:         config.Size(100 * config.Megabyte),
 				}
 				mockAnswer, _ = util.NewMsgWithAnswer("example.com.", 300, A, "123.122.121.120")
 			})
@@ -381,7 +390,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				By("check log", func() {
 					Eventually(func(g Gomega) {
 						csvLines, err := readCsv(tmpDir.JoinPath(
-							time.Now().Format("2006-01-02") + "_ALL.log"))
+							time.Now().Format("2006-01-02") + "_ALL_001.log"))
 
 						g.Expect(err).Should(Succeed())
 						g.Expect(csvLines).Should(HaveLen(1))
@@ -409,6 +418,7 @@ var _ = Describe("QueryLoggingResolver", func() {
 				// needing a target; the writer is replaced with SlowMockWriter below.
 				sutConfig = config.QueryLog{
 					Type:             config.QueryLogTypeConsole,
+					Fields:           config.QueryLogFieldValues(),
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
@@ -431,8 +441,9 @@ var _ = Describe("QueryLoggingResolver", func() {
 		When("fallback logger is enabled, log retention is enabled", func() {
 			BeforeEach(func() {
 				sutConfig = config.QueryLog{
-					Retention: config.Duration(7 * 24 * time.Hour),
+					Retention:        config.Duration(7 * 24 * time.Hour),
 					Type:             config.QueryLogTypeConsole,
+					Fields:           config.QueryLogFieldValues(),
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
@@ -446,18 +457,20 @@ var _ = Describe("QueryLoggingResolver", func() {
 				sutConfig = config.QueryLog{
 					Target:           config.Secret(tmpDir.Path),
 					Type:             config.QueryLogTypeCsv,
-					Retention: config.Duration(7 * 24 * time.Hour),
+					Retention:        config.Duration(7 * 24 * time.Hour),
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
 			})
 			It("should remove files older than defined log retention", func() {
-				// create 2 files, 7 and 8 days old
-				dateBefore7Days := time.Now().AddDate(0, 0, -7)
-				dateBefore9Days := time.Now().AddDate(0, 0, -9)
+				row := func(ts time.Time) string {
+					return ts.Format("2006-01-02 15:04:05") + "\t1.1.1.1\tc1\t20\tok\texample.com.\t\tNOERROR\tRESOLVED\tA\t"
+				}
 
-				f1 := tmpDir.CreateEmptyFile(dateBefore7Days.Format("2006-01-02") + "-test.log")
-				f2 := tmpDir.CreateEmptyFile(dateBefore9Days.Format("2006-01-02") + "-test.log")
+				fresh := time.Now().AddDate(0, 0, -1)
+				expired := time.Now().AddDate(0, 0, -9)
+				f1 := tmpDir.CreateStringFile(fresh.Format("2006-01-02")+"_ALL_001.log", row(fresh))
+				f2 := tmpDir.CreateStringFile(expired.Format("2006-01-02")+"_ALL_001.log", row(expired))
 
 				sut.doCleanUp()
 
@@ -478,9 +491,10 @@ var _ = Describe("QueryLoggingResolver", func() {
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
+				allowWriterFailure = true
 			})
-			It("should use fallback", func() {
-				Expect(sut.cfg.Type).Should(Equal(config.QueryLogTypeConsole))
+			It("should fail to start", func() {
+				Expect(err).Should(MatchError(ContainSubstring("can't create query log writer")))
 			})
 		})
 
@@ -492,9 +506,10 @@ var _ = Describe("QueryLoggingResolver", func() {
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
+				allowWriterFailure = true
 			})
-			It("should use fallback", func() {
-				Expect(sut.cfg.Type).Should(Equal(config.QueryLogTypeConsole))
+			It("should fail to start", func() {
+				Expect(err).Should(MatchError(ContainSubstring("can't create query log writer")))
 			})
 		})
 
@@ -506,9 +521,10 @@ var _ = Describe("QueryLoggingResolver", func() {
 					CreationAttempts: 1,
 					CreationCooldown: config.Duration(time.Millisecond),
 				}
+				allowWriterFailure = true
 			})
-			It("should use fallback", func() {
-				Expect(sut.cfg.Type).Should(Equal(config.QueryLogTypeConsole))
+			It("should fail to start", func() {
+				Expect(err).Should(MatchError(ContainSubstring("can't create query log writer")))
 			})
 		})
 	})

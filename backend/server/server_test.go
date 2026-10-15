@@ -781,6 +781,7 @@ var _ = Describe("Running DNS server", func() {
 			cErr = defaults.Set(&cfg)
 
 			Expect(cErr).Should(Succeed())
+			cfg.QueryLog.Type = config.QueryLogTypeConsole
 
 			cfg.Upstreams.Groups = map[string][]config.Upstream{
 				"default": {config.Upstream{Net: config.NetProtocolTcpUdp, Host: "1.1.1.1", Port: 53}},
@@ -1701,6 +1702,7 @@ var _ = Describe("Running DNS server", func() {
 			cErr = defaults.Set(&cfg)
 
 			Expect(cErr).Should(Succeed())
+			cfg.QueryLog.Type = config.QueryLogTypeConsole
 
 			cfg.Upstreams.Groups = map[string][]config.Upstream{
 				"default": {config.Upstream{Net: config.NetProtocolTcpUdp, Host: "1.1.1.1", Port: 53}},
@@ -1783,6 +1785,7 @@ func requestServer(ctx context.Context, request *dns.Msg) *dns.Msg {
 func newProxyProtocolTestServer(ctx context.Context, configurePorts func(*config.Ports)) *Server {
 	cfg := config.Config{}
 	Expect(defaults.Set(&cfg)).Should(Succeed())
+	cfg.QueryLog.Type = config.QueryLogTypeConsole
 	cfg.Upstreams.Groups = map[string][]config.Upstream{
 		"default": {config.Upstream{Net: config.NetProtocolTcpUdp, Host: "1.1.1.1", Port: 53}},
 	}

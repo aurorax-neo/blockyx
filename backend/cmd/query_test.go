@@ -96,7 +96,7 @@ var _ = Describe("Blocking command", func() {
 				apiPort = 0
 				err := query(withContext(NewQueryCommand()), []string{"google.de"})
 				Expect(err).Should(HaveOccurred())
-				Expect(err.Error()).Should(ContainSubstring("connection refused"))
+				Expect(err.Error()).Should(Or(ContainSubstring("connection refused"), ContainSubstring("can't assign requested address")))
 			})
 		})
 	})

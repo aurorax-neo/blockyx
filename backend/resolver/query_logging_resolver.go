@@ -162,10 +162,7 @@ func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) (*QueryLo
 			)
 		}))
 	if err != nil {
-		logger.Error("can't create query log writer, using console as fallback: ", err)
-
-		writer = querylog.NewLoggerWriter()
-		cfg.Type = config.QueryLogTypeConsole
+		return nil, fmt.Errorf("can't create query log writer: %w", err)
 	}
 
 	logChan := make(chan *querylog.LogEntry, logChanCap)

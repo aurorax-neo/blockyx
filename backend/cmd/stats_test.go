@@ -191,7 +191,7 @@ var _ = Describe("stats command", func() {
 			apiPort = 0
 			err := stats(withContext(NewStatsCommand()), []string{})
 			Expect(err).Should(HaveOccurred())
-			Expect(err.Error()).Should(ContainSubstring("connection refused"))
+			Expect(err.Error()).Should(Or(ContainSubstring("connection refused"), ContainSubstring("can't assign requested address")))
 		})
 	})
 })

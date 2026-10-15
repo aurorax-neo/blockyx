@@ -70,7 +70,7 @@ var _ = Describe("Lists command", func() {
 				apiPort = 0
 				err = c.Execute()
 				Expect(err).Should(HaveOccurred())
-				Expect(err.Error()).Should(ContainSubstring("connection refused"))
+				Expect(err.Error()).Should(Or(ContainSubstring("connection refused"), ContainSubstring("can't assign requested address")))
 			})
 		})
 	})

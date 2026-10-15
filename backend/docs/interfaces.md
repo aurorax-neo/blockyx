@@ -25,11 +25,13 @@ You can also browse the interactive API documentation (RapiDoc) documentation [o
 | POST   | `/api/query`            | Run a DNS query through Blocky and return the result as JSON. |
 | GET    | `/api/stats`            | In-memory DNS statistics over a rolling 24h window as JSON. Requires [statistics](configuration.md#statistics) to be enabled; returns `503` otherwise. |
 
-!!! note "API key authentication (blockyx extension)"
+!!! note "API key authentication"
 
-    When `api.apiKey` is configured (or the `BLOCKYX_API_KEY` environment variable is set),
-    every endpoint above requires the key as `X-API-Key` header or
-    `Authorization: Bearer <key>` header, and returns HTTP `401` without it.
+    `/api/*` and `/debug` always require a key when one is configured, including the query-log routes below.
+    Send `X-API-Key` or `Authorization: Bearer <key>`. A request without the key gets HTTP 401.
+    If both `api.apiKey` and `BLOCKYX_API_KEY` are empty, the process generates a key, tries to save it
+    into the single config file without rewriting the rest of the file, and prints it to stderr.
+    `/metrics`, `/docs/*`, DoH and the web UI files are not authenticated.
 
 !!! example "Flush the DNS cache"
 
@@ -75,24 +77,43 @@ You can also browse the interactive API documentation (RapiDoc) documentation [o
     `Z` suffix), regardless of the server's local time zone. Statistics are independent of Prometheus
     and work with plain JSON.
 
+## Query log API
+
+These routes sit under `/api/querylog` and use the same API key. They read a
+`sqlite`, `mysql`, `postgresql`, `timescale`, `csv` or `csv-client` log.
+`console`, `dnstap` and `none` answer `GET /status` with `"supported": false`
+and return HTTP 503 for the other routes.
+
+| Method | Path                         | Purpose                                              |
+| ------ | ---------------------------- | ---------------------------------------------------- |
+| GET    | `/api/querylog/status`       | Configured log type and whether the UI can search it. |
+| GET    | `/api/querylog/rows`         | Log rows, newest first. `limit` and `offset` paginate. |
+| GET    | `/api/querylog/count`        | Row count for the active filters.                    |
+| GET    | `/api/querylog/over-time`    | Buckets. `interval` is a Go duration, for example `1h`. |
+| GET    | `/api/querylog/top`          | Top domains or clients.                              |
+| GET    | `/api/querylog/search`       | Filter suggestions.                                  |
+| GET    | `/api/querylog/query-types`  | Counts by DNS query type.                            |
+
+Filters shared by these routes include `from`, `to`, `search`, `domain`, `client`, `qtype` and `rtype`.
+
 ## CLI
 
-Blocky provides a CLI interface to control. This interface uses internally the REST API.
+Blocky provides a CLI. `blocking`, `lists`, `cache`, `query` and `stats` call the REST API on this host.
 
-To run the CLI, please ensure, that blocky DNS server is running, then execute `blocky help` for help or
+- `./blockyx blocking enable`
+- `./blockyx blocking disable`
+- `./blockyx blocking disable --duration [duration]`
+- `./blockyx blocking disable --groups ads,othergroup`
+- `./blockyx blocking status`
+- `./blockyx query <domain>`
+- `./blockyx query <domain> --type <queryType>`
+- `./blockyx lists refresh`
+- `./blockyx stats`
+- `./blockyx validate [--config /path/to/config.yaml]`
+- `./blockyx healthcheck` performs a DNS query for `healthcheck.blocky.` and does not call HTTP
 
-- `./blocky blocking enable` to enable blocking
-- `./blocky blocking disable` to disable blocking
-- `./blocky blocking disable --duration [duration]` to disable blocking for a certain amount of time (30s, 5m, 10m30s,
-  ...)
-- `./blocky blocking disable --groups ads,othergroup` to disable blocking only for special groups
-- `./blocky blocking status` to print current status of blocking
-- `./blocky query <domain>` execute DNS query (A) (simple replacement for dig, useful for debug purposes)
-- `./blocky query <domain> --type <queryType>` execute DNS query with passed query type (A, AAAA, MX, ...)
-- `./blocky lists refresh` reloads all allow/denylists
-- `./blocky stats` shows DNS statistics (requires `statistics.enable: true`)
-- `./blocky validate [--config /path/to/config.yaml]` validates configuration file
+!!! note "CLI control commands send the API key"
 
-!!! tip 
-
-    To run this inside docker run `docker exec blocky ./blocky blocking status`
+    `blocking`, `lists`, `cache`, `query` and `stats` call the local HTTP API and send
+    `X-API-Key` from `api.apiKey` or `BLOCKYX_API_KEY` (`BLOCKYX_API_KEY` wins).
+    `validate` only reads the config file. `healthcheck` only speaks DNS.

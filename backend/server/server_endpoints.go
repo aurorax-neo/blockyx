@@ -201,7 +201,7 @@ func createHTTPRouter(cfg *config.Config, openAPIImpl api.StrictServerInterface)
 
 	configureQueryLogHandler(router, cfg)
 
-	configureDebugHandler(router)
+	configureDebugHandler(router, cfg.API.APIKey.Reveal())
 
 	configureDocsHandler(router)
 
@@ -290,6 +290,14 @@ func uiFileExists(uiFS fs.FS, name string) bool {
 func serveUIFile(w http.ResponseWriter, r *http.Request, uiFS fs.FS, name string) {
 	f, err := uiFS.Open(name)
 	if err != nil {
+		if name == "index.html" {
+			w.Header().Set(contentTypeHeader, htmlContentType)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(web.IndexTmpl))
+
+			return
+		}
+
 		http.NotFound(w, r)
 
 		return
@@ -321,6 +329,9 @@ func logAndResponseWithError(err error, message string, writer http.ResponseWrit
 	}
 }
 
-func configureDebugHandler(router *chi.Mux) {
-	router.Mount("/debug", middleware.Profiler())
+func configureDebugHandler(router *chi.Mux, apiKey string) {
+	debugRouter := chi.NewRouter()
+	debugRouter.Use(api.APIKeyAuthMiddleware(apiKey))
+	debugRouter.Mount("/", middleware.Profiler())
+	router.Mount("/debug", debugRouter)
 }

@@ -44,7 +44,7 @@ var _ = Describe("Cache command", func() {
 				apiPort = 0
 				err := flushCache(withContext(newCacheCommand()), []string{})
 				Expect(err).Should(HaveOccurred())
-				Expect(err.Error()).Should(ContainSubstring("connection refused"))
+				Expect(err.Error()).Should(Or(ContainSubstring("connection refused"), ContainSubstring("can't assign requested address")))
 			})
 		})
 	})

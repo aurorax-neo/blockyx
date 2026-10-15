@@ -1,5 +1,9 @@
 # Installation
 
+Install the blockyx image from the repository root `README.md`. It listens for DNS on 53 and serves the API and web UI on 4000.
+
+The configuration file is the same shape as [blocky](https://github.com/0xERR0R/blocky). Image names and download links in the examples below belong to that project; use the root `Dockerfile` for blockyx.
+
 You can choose one of the following installation options:
 
 * Run as standalone binary
@@ -77,8 +81,8 @@ ports:
 
         The container runs as the unprivileged user **UID 100**. Any directory Blocky
         writes to - the query log target, or `loading.downloads.cachePath` - must be
-        writable by that user, otherwise Blocky logs a `permission denied` error and
-        continues without writing.
+        writable by that user. If the query log writer cannot be created, the process
+        exits at startup and does not fall back to the console.
 
         The image ships `/app/cache` and `/logs` pre-created and owned by UID 100, so
         mounting a **named volume** over either path works with no host-side setup:
@@ -274,6 +278,6 @@ See [https://truecharts.org/charts/stable/blocky/](https://truecharts.org/charts
 - [Blocky Frontend](https://github.com/Mozart409/blocky-frontend) provides a Web UI to control blocky.
 See linked project for installation instructions.
 
-- [BlockyUI](https://github.com/GabeDuarteM/blocky-ui) provides a fully featured and modern Web UI for managing your Blocky DNS server.
+- The web UI ships inside blockyx. It follows [blocky-ui](https://github.com/GabeDuarteM/blocky-ui).
 
 - [Blocky Visor](https://github.com/JCHHeilmann/blocky-visor) is a static SPA dashboard with live metrics and DNS query testing. Comes with an optional Go sidecar that adds historical analytics based on parsing Blocky's log files, log viewing, and config editing.

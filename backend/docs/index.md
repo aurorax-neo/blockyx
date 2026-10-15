@@ -1,4 +1,8 @@
-# Blocky
+# blockyx
+
+DNS proxy and ad blocker for the local network, with an embedded web UI. Install from the repository root `README.md`.
+
+The configuration described on this site follows [blocky](https://github.com/0xERR0R/blocky). The web UI follows [blocky-ui](https://github.com/GabeDuarteM/blocky-ui).
 
 <figure>
   <img src="https://raw.githubusercontent.com/0xERR0R/blocky/main/docs/blocky.svg" width="200" />
