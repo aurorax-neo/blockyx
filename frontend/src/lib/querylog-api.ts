@@ -45,7 +45,9 @@ export async function fetchLogRows(
   offset: number,
 ): Promise<{ items: QueryLogEntry[]; hasMore: boolean }> {
   return client
-    .get(`querylog/rows?${params(filters, { limit, offset })}`)
+    .get(`querylog/rows?${params(filters, { limit, offset })}`, {
+      cache: "no-store",
+    })
     .json();
 }
 
@@ -53,7 +55,7 @@ export async function fetchLogCount(
   client: KyInstance,
   filters: QueryLogFilters,
 ): Promise<{ total: number }> {
-  return client.get(`querylog/count?${params(filters)}`).json();
+  return client.get(`querylog/count?${params(filters)}`, { cache: "no-store" }).json();
 }
 
 export interface OverTimeBucket {
@@ -69,7 +71,9 @@ export async function fetchLogOverTime(
   interval: string,
 ): Promise<{ items: OverTimeBucket[] }> {
   return client
-    .get(`querylog/over-time?${params(filters, { interval })}`)
+    .get(`querylog/over-time?${params(filters, { interval })}`, {
+      cache: "no-store",
+    })
     .json();
 }
 
@@ -88,7 +92,9 @@ export async function fetchLogTop(
   offset = 0,
 ): Promise<{ items: TopEntry[]; totalCount: number }> {
   return client
-    .get(`querylog/top?${params(filters, { type, filter, limit, offset })}`)
+    .get(`querylog/top?${params(filters, { type, filter, limit, offset })}`, {
+      cache: "no-store",
+    })
     .json();
 }
 
@@ -98,5 +104,9 @@ export async function searchLogNames(
   type: "domains" | "clients",
   q: string,
 ): Promise<{ items: { name: string; count: number }[] }> {
-  return client.get(`querylog/search?${params(filters, { type, q })}`).json();
+  return client
+    .get(`querylog/search?${params(filters, { type, q })}`, {
+      cache: "no-store",
+    })
+    .json();
 }

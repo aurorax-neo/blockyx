@@ -195,7 +195,15 @@ export function QueryLogs({
     ),
     [showServerColumn],
   );
-  const refreshLogs = useCallback(() => refetch(), [refetch]);
+  const isRefreshing = isFetchingLogs || count.isFetching;
+  const refreshLogs = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["querylog", "rows"] }),
+      queryClient.invalidateQueries({ queryKey: ["querylog", "count"] }),
+      rows.refetch(),
+      count.refetch(),
+    ]);
+  }, [queryClient, rows, count]);
   const table = (
     <DataTable
       columns={showServerColumn ? serverColumns : columns}
@@ -254,10 +262,10 @@ export function QueryLogs({
                   variant="ghost"
                   size="responsive-icon"
                   onClick={refreshLogs}
-                  disabled={isFetchingLogs}
+                  disabled={isRefreshing}
                   aria-label="Refresh"
                 >
-                  <RefreshCw className={isFetchingLogs ? "animate-spin" : ""} />
+                  <RefreshCw className={isRefreshing ? "animate-spin" : ""} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent sideOffset={4}>Refresh</TooltipContent>

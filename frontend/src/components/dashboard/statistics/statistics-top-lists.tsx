@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, ListOrdered, type LucideIcon, Users } from "lucide-react";
+import { Globe, ListOrdered, type LucideIcon, RefreshCw, Users } from "lucide-react";
 import { useState } from "react";
 
 import { useDashboardServers } from "~/components/dashboard/server-context";
@@ -18,7 +18,8 @@ import {
   type TopListFilterControls,
   TopListsSection,
 } from "./top-list";
-
+import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 const DISPLAYED_ENTRIES = 5;
 
 interface NameCount {
@@ -118,25 +119,42 @@ export function StatisticsTopLists() {
       description="Most active domains and clients in the last 24 hours"
       icon={ListOrdered}
       controls={
-        available.length > 1 ? (
-          <Select value={current?.serverId} onValueChange={setServerId}>
-            <SelectTrigger
-              aria-label="Top lists server"
-              className="w-full sm:w-48"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {available.map((result) => (
-                <SelectItem key={result.serverId} value={result.serverId}>
-                  {dashboard.servers.find(
-                    (server) => server.id === result.serverId,
-                  )?.name ?? result.serverId}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : undefined
+        <div className="flex items-center gap-2">
+          {available.length > 1 ? (
+            <Select value={current?.serverId} onValueChange={setServerId}>
+              <SelectTrigger
+                aria-label="Top lists server"
+                className="w-full sm:w-48"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {available.map((result) => (
+                  <SelectItem key={result.serverId} value={result.serverId}>
+                    {dashboard.servers.find(
+                      (server) => server.id === result.serverId,
+                    )?.name ?? result.serverId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          <Button
+            variant="outline"
+            size="responsive-icon"
+            onClick={() => dashboard.refetchStatistics?.()}
+            disabled={dashboard.isFetchingStatistics}
+            aria-label="Refresh top lists"
+            title="Refresh top lists"
+          >
+            <RefreshCw
+              className={cn(
+                "h-4 w-4",
+                dashboard.isFetchingStatistics && "animate-spin",
+              )}
+            />
+          </Button>
+        </div>
       }
     >
       <StatisticsTopList

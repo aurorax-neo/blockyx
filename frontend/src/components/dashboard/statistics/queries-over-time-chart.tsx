@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { BarChart3, Loader2 } from "lucide-react";
+import { BarChart3, Loader2, RefreshCw } from "lucide-react";
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "~/components/ui/button";
@@ -334,6 +334,16 @@ export function QueriesOverTimeChart({
             range={range}
           />
           <TimeRangeSelector value={range} onChange={onRangeChange} />
+          <Button
+            variant="outline"
+            size="responsive-icon"
+            onClick={() => connected.refetch()}
+            disabled={connected.isFetching}
+            aria-label="Refresh chart data"
+            title="Refresh chart"
+          >
+            <RefreshCw className={cn("h-4 w-4", connected.isFetching && "animate-spin")} />
+          </Button>
         </>
       }
       activeFilter={

@@ -1,7 +1,8 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Database, Pause, Power } from "lucide-react";
+import { Database, Pause, Power, RefreshCw } from "lucide-react";
+import { cn } from "~/lib/utils";
 import { type ReactNode, useCallback, useEffect } from "react";
 import { ActionLayout } from "~/components/dashboard/action-layout";
 import { useDashboardServers } from "~/components/dashboard/server-context";
@@ -77,13 +78,25 @@ export function ServerStatus({ controls }: { controls?: ReactNode }) {
             <Database className="h-5 w-5" />
             Blocking Status
           </span>
-          {dashboard.loading ? (
-            <Skeleton className="h-5 w-16" />
-          ) : (
-            <StatusBadge tone={displayStatus.tone}>
-              {displayStatus.label}
-            </StatusBadge>
-          )}
+          <div className="flex items-center gap-2">
+            {dashboard.loading ? (
+              <Skeleton className="h-5 w-16" />
+            ) : (
+              <StatusBadge tone={displayStatus.tone}>
+                {displayStatus.label}
+              </StatusBadge>
+            )}
+            <Button
+              variant="ghost"
+              size="responsive-icon"
+              onClick={() => dashboard.refetchStatus?.()}
+              disabled={dashboard.isFetchingStatus}
+              aria-label="Refresh blocking status"
+              title="Refresh blocking status"
+            >
+              <RefreshCw className={cn("h-4 w-4", dashboard.isFetchingStatus && "animate-spin")} />
+            </Button>
+          </div>
         </CardTitle>
         <CardDescription>
           Enable blocking or pause it temporarily

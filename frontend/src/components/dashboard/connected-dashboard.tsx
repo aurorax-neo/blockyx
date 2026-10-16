@@ -112,6 +112,10 @@ export function ConnectedDashboard({ apiKey }: { apiKey: string }) {
         statusUpdatedAt: status.dataUpdatedAt,
         statistics: statistics.data,
         statisticsLoading: statistics.isLoading,
+        refetchStatus: () => status.refetch(),
+        isFetchingStatus: status.isFetching,
+        refetchStatistics: () => statistics.refetch(),
+        isFetchingStatistics: statistics.isFetching,
         reportDiagnostics,
       }}
     >

@@ -1,6 +1,7 @@
 "use client";
 
-import { Activity, ChartPie, ChevronDown, Database, List } from "lucide-react";
+import { Activity, ChartPie, ChevronDown, Database, List, RefreshCw } from "lucide-react";
+import { useCallback } from "react";
 import { useDashboardServers } from "~/components/dashboard/server-context";
 import { Button } from "~/components/ui/button";
 import {
@@ -17,13 +18,17 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { aggregateStatistics } from "~/lib/aggregate-statistics";
-import { formatCount } from "~/lib/utils";
+import { formatCount, cn } from "~/lib/utils";
 import { StatCard } from "./stat-card";
 
 export function StatisticsOverview() {
   const dashboard = useDashboardServers();
   const overview = aggregateStatistics(dashboard.statistics ?? []);
   const isLoading = dashboard.statisticsLoading;
+  const isFetching = dashboard.isFetchingStatistics;
+  const handleRefresh = useCallback(() => {
+    dashboard.refetchStatistics?.();
+  }, [dashboard]);
   const inventories =
     dashboard.statistics?.flatMap((result) =>
       result.success && result.data
@@ -53,7 +58,23 @@ export function StatisticsOverview() {
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between px-1">
+        <span className="font-medium text-sm text-muted-foreground">
+          Overview
+        </span>
+        <Button
+          variant="ghost"
+          size="responsive-icon"
+          onClick={handleRefresh}
+          disabled={isFetching}
+          aria-label="Refresh overview statistics"
+          title="Refresh overview"
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </Button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
         title="Total Queries"
         value={overview?.totalQueries ?? 0}
@@ -178,6 +199,7 @@ export function StatisticsOverview() {
           }
         />
       )}
+      </div>
     </div>
   );
 }

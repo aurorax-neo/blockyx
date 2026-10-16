@@ -1,7 +1,10 @@
 "use client";
 
-import { ListOrdered } from "lucide-react";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { ListOrdered, RefreshCw } from "lucide-react";
 import { useCallback, useState } from "react";
+import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 import { useDashboardServers } from "~/components/dashboard/server-context";
 import {
   Select,
@@ -25,6 +28,11 @@ export function ChartsSection() {
   const [rowsPerTable, setRowsPerTable] = useState<RowsOption>(5);
   const dashboard = useDashboardServers();
   const scopeKey = JSON.stringify(dashboard.selection.selected("view"));
+  const queryClient = useQueryClient();
+  const isFetchingTop = useIsFetching({ queryKey: ["querylog", "top"] }) > 0;
+  const handleRefreshTop = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["querylog", "top"] });
+  }, [queryClient]);
   const [pageState, setPageState] = useState({
     scopeKey,
     domains: 0,
@@ -110,6 +118,16 @@ export function ChartsSection() {
               value={topListsRange}
               onChange={handleTopListsRangeChange}
             />
+            <Button
+              variant="outline"
+              size="responsive-icon"
+              onClick={handleRefreshTop}
+              disabled={isFetchingTop}
+              aria-label="Refresh top lists"
+              title="Refresh top lists"
+            >
+              <RefreshCw className={cn("h-4 w-4", isFetchingTop && "animate-spin")} />
+            </Button>
           </div>
         }
       >

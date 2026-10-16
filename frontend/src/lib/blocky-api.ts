@@ -28,7 +28,11 @@ export function createApiClient(apiKey?: string | null): KyInstance {
 
   return ky.create({
     prefix: "/api",
-    headers: key ? { "X-API-Key": key } : {},
+    headers: {
+      ...(key ? { "X-API-Key": key } : {}),
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
     throwHttpErrors: true,
   });
 }

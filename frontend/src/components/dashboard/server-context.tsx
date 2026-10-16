@@ -33,6 +33,10 @@ export interface DashboardServers {
   statusUpdatedAt: number;
   statistics: StatisticsResult[] | undefined;
   statisticsLoading: boolean;
+  refetchStatus?: () => Promise<unknown>;
+  isFetchingStatus?: boolean;
+  refetchStatistics?: () => Promise<unknown>;
+  isFetchingStatistics?: boolean;
   reportDiagnostics: (
     key: string,
     diagnostics: { sourceId: string; message: string }[],
