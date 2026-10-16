@@ -84,13 +84,13 @@ func normalizeCacheKey(r *http.Request) string {
 	q := r.URL.Query()
 	if from := q.Get("from"); from != "" {
 		if t, err := time.Parse(time.RFC3339, from); err == nil {
-			rounded := time.Unix((t.Unix()/30)*30, 0).UTC().Format(time.RFC3339)
+			rounded := time.Unix((t.Unix()/60)*60, 0).UTC().Format(time.RFC3339)
 			q.Set("from", rounded)
 		}
 	}
 	if to := q.Get("to"); to != "" {
 		if t, err := time.Parse(time.RFC3339, to); err == nil {
-			rounded := time.Unix((t.Unix()/30)*30, 0).UTC().Format(time.RFC3339)
+			rounded := time.Unix((t.Unix()/60)*60, 0).UTC().Format(time.RFC3339)
 			q.Set("to", rounded)
 		}
 	}
@@ -165,6 +165,9 @@ func configureQueryLogHandler(router *chi.Mux, cfg *config.Config) {
 
 func writeQueryLogJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	if status == http.StatusOK {
+		w.Header().Set("Cache-Control", "private, max-age=15, stale-while-revalidate=30")
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -686,7 +689,7 @@ func (h *queryLogHandler) count(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data := map[string]any{"total": total}
-		h.cache.set(key, data, 10*time.Second)
+		h.cache.set(key, data, 30*time.Second)
 
 		return data, nil
 	})
@@ -729,7 +732,7 @@ func (h *queryLogHandler) overTime(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data := map[string]any{"items": items}
-		h.cache.set(key, data, 15*time.Second)
+		h.cache.set(key, data, 60*time.Second)
 
 		return data, nil
 	})
@@ -775,7 +778,7 @@ func (h *queryLogHandler) top(w http.ResponseWriter, r *http.Request) {
 			"items":      items,
 			"totalCount": totalCount,
 		}
-		h.cache.set(key, data, 15*time.Second)
+		h.cache.set(key, data, 60*time.Second)
 
 		return data, nil
 	})
@@ -817,7 +820,7 @@ func (h *queryLogHandler) search(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data := map[string]any{"items": items}
-		h.cache.set(key, data, 30*time.Second)
+		h.cache.set(key, data, 60*time.Second)
 
 		return data, nil
 	})
@@ -855,7 +858,7 @@ func (h *queryLogHandler) queryTypes(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data := map[string]any{"items": items}
-		h.cache.set(key, data, 15*time.Second)
+		h.cache.set(key, data, 60*time.Second)
 
 		return data, nil
 	})

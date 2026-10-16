@@ -67,9 +67,11 @@ func (r *DBReader) ensureIndexes() {
 	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale, config.QueryLogTypeSqlite:
 		_ = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_log_entries_ts_qname ON " + tableName + " (request_ts, question_name)").Error
 		_ = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_log_entries_ts_client ON " + tableName + " (request_ts, client_name, client_ip)").Error
+		_ = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_log_entries_ts_resp ON " + tableName + " (request_ts, response_type)").Error
 	case config.QueryLogTypeMysql:
 		_ = r.db.Exec("CREATE INDEX idx_log_entries_ts_qname ON `" + tableName + "` (request_ts, question_name)").Error
 		_ = r.db.Exec("CREATE INDEX idx_log_entries_ts_client ON `" + tableName + "` (request_ts, client_name, client_ip)").Error
+		_ = r.db.Exec("CREATE INDEX idx_log_entries_ts_resp ON `" + tableName + "` (request_ts, response_type)").Error
 	}
 }
 
@@ -200,7 +202,7 @@ func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket
 	}
 
 	var rows []overTimeSQLRow
-	selectClause := fmt.Sprintf("%s AS bucket_sec, COUNT(*) AS total, SUM(CASE WHEN response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%%' THEN 1 ELSE 0 END) AS blocked, SUM(CASE WHEN response_type = 'CACHED' THEN 1 ELSE 0 END) AS cached", bucketExpr)
+	selectClause := fmt.Sprintf("%s AS bucket_sec, COUNT(*) AS total, SUM(CASE WHEN response_type IN ('BLOCKED', 'REBIND') THEN 1 ELSE 0 END) AS blocked, SUM(CASE WHEN response_type = 'CACHED' THEN 1 ELSE 0 END) AS cached", bucketExpr)
 	err := r.applyFilter(r.db.Model(&logEntry{}), f).
 		Select(selectClause).
 		Group("bucket_sec").
@@ -212,7 +214,8 @@ func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket
 
 	rowMap := make(map[int64]overTimeSQLRow, len(rows))
 	for _, row := range rows {
-		rowMap[row.BucketSec] = row
+		bucketKey := (row.BucketSec / intervalSec) * intervalSec
+		rowMap[bucketKey] = row
 	}
 
 	if f != nil && !f.From.IsZero() && !f.To.IsZero() {
@@ -327,11 +330,11 @@ func (r *DBReader) Top(f *Filter, byClient bool, blockedOnly bool, limit, offset
 
 	q := r.applyFilter(r.db.Model(&logEntry{}), f).Where(filterCond)
 	if blockedOnly {
-		q = q.Where("response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%'")
+		q = q.Where("response_type IN ('BLOCKED', 'REBIND')")
 	}
 
 	var rows []topRow
-	selectClause := fmt.Sprintf("%s AS name, COUNT(*) AS total, SUM(CASE WHEN response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%%' THEN 1 ELSE 0 END) AS blocked", nameExpr)
+	selectClause := fmt.Sprintf("%s AS name, COUNT(*) AS total, SUM(CASE WHEN response_type IN ('BLOCKED', 'REBIND') THEN 1 ELSE 0 END) AS blocked", nameExpr)
 	err := q.Select(selectClause).
 		Group(nameExpr).
 		Order("total DESC, name ASC").
