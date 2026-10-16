@@ -181,10 +181,9 @@ func NewQueryLoggingResolver(ctx context.Context, cfg config.QueryLog) (*QueryLo
 
 	go resolver.writeLog(ctx)
 
-	// Timescale uses database features for retention
-	if cfg.Retention.IsAboveZero() &&
-		cfg.Type != config.QueryLogTypeTimescale &&
-		cfg.Type != config.QueryLogTypeDnstap {
+	// Dnstap has no database. Timescale drops log_entries itself, but the
+	// counter and top tables are plain tables and still need cleanup.
+	if cfg.Retention.IsAboveZero() && cfg.Type != config.QueryLogTypeDnstap {
 		go resolver.periodicCleanUp(ctx)
 	}
 

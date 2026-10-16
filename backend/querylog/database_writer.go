@@ -13,7 +13,6 @@ import (
 
 	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/log"
-	"github.com/hashicorp/go-multierror"
 
 	"github.com/0xERR0R/blocky/util"
 
@@ -44,6 +43,8 @@ type DatabaseWriter struct {
 	pendingEntries []*logEntry
 	lock           sync.RWMutex
 	dbFlushPeriod  time.Duration
+	dbType         config.QueryLogType
+	rollupWarned   bool
 }
 
 func NewDatabaseWriter(ctx context.Context, dbType config.QueryLogType, target string, retention time.Duration,
@@ -106,6 +107,7 @@ func newDatabaseWriter(ctx context.Context, target gorm.Dialector, retention tim
 		db:            db,
 		retention:     retention,
 		dbFlushPeriod: dbFlushPeriod,
+		dbType:        dbType,
 	}
 
 	go w.periodicFlush(ctx)
@@ -214,36 +216,29 @@ func (d *DatabaseWriter) Write(entry *LogEntry) {
 
 func (d *DatabaseWriter) CleanUp() {
 	deletionDate := time.Now().Add(-d.retention)
-
-	log.PrefixedLog("database_writer").Debugf("deleting log entries with request_ts < %s", deletionDate)
-	d.db.Where("request_ts < ?", deletionDate).Delete(&logEntry{})
+	d.deleteExpiredEntries(deletionDate)
+	d.deleteRollupBuckets(counterTableName, alignDown(deletionDate.Unix(), rollupBucketSec))
+	d.deleteRollupBuckets(hourTableName, alignDown(deletionDate.Unix(), topHourSec))
+	d.pruneRecent()
 }
 
 func (d *DatabaseWriter) doDBWrite() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	var err *multierror.Error
-
-	if len(d.pendingEntries) > 0 {
-		log.Log().Tracef("%d entries to write", len(d.pendingEntries))
-
-		const bulkSize = 100
-
-		for i := 0; i < len(d.pendingEntries); i += bulkSize {
-			j := min(i+bulkSize, len(d.pendingEntries))
-			// write bulk
-			tx := d.db.Create(d.pendingEntries[i:j])
-			err = multierror.Append(err, tx.Error)
-		}
-
-		// clear the slice with pending entries
-		d.pendingEntries = nil
-
-		if multiErr := err.ErrorOrNil(); multiErr != nil {
-			return fmt.Errorf("failed to write querylog entries to database: %w", multiErr)
-		}
+	if len(d.pendingEntries) == 0 {
+		return nil
 	}
 
-	return nil
+	log.Log().Tracef("%d entries to write", len(d.pendingEntries))
+
+	if err := d.prepareRollup(); err != nil {
+		d.warnRollupSchema(err)
+
+		return nil
+	}
+
+	d.pruneRecent()
+
+	return d.flushPending()
 }
