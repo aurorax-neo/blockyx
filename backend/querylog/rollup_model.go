@@ -91,9 +91,10 @@ type rollupOverTimeRow struct {
 }
 
 type topRollupRow struct {
-	Name    string    `gorm:"column:name"`
-	Total   rollupInt `gorm:"column:total"`
-	Blocked rollupInt `gorm:"column:blocked"`
+	Name       string    `gorm:"column:name"`
+	Total      rollupInt `gorm:"column:total"`
+	Blocked    rollupInt `gorm:"column:blocked"`
+	TotalCount rollupInt `gorm:"column:total_count"`
 }
 
 type overTimePoint struct {

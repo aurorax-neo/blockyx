@@ -1,6 +1,7 @@
 package querylog
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -163,6 +164,21 @@ func blockedCaseSQL() string {
 
 func cachedCaseSQL() string {
 	return "SUM(CASE WHEN response_type = '" + responseCached + "' THEN 1 ELSE 0 END)"
+}
+
+func nameKindSQL(dbType config.QueryLogType, step, kind int, nameExpr string) (string, error) {
+	if kind != rollupKindDomain && kind != rollupKindClient {
+		return "", fmt.Errorf("invalid rollup kind %d", kind)
+	}
+
+	bucket := entryBucketSQL(dbType, step)
+
+	// Kind is a constant. PostgreSQL types an untyped SELECT parameter as text,
+	// and pgx then refuses to encode the Go integer.
+	return "SELECT " + strconv.Itoa(kind) + " AS kind, " + bucket + " AS bucket_sec, " + nameExpr +
+		" AS name, COUNT(*) AS total, " + blockedCaseSQL() +
+		" AS blocked FROM log_entries WHERE request_ts >= ? AND request_ts < ? AND " +
+		nameExpr + " IS NOT NULL AND " + nameExpr + " <> '' GROUP BY " + bucket + ", " + nameExpr, nil
 }
 
 func entryBucketSQL(dbType config.QueryLogType, step int) string {

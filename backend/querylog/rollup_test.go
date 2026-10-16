@@ -254,6 +254,18 @@ var _ = Describe("log rollup storage", func() {
 	})
 })
 
+var _ = Describe("rollup name aggregation SQL", func() {
+	It("inlines the kind so PostgreSQL does not treat it as text", func() {
+		stmt, err := nameKindSQL(config.QueryLogTypePostgresql, topHourSec, rollupKindDomain, questionNameCol)
+		Expect(err).Should(Succeed())
+		Expect(stmt).Should(HavePrefix("SELECT 1 AS kind,"))
+		Expect(stmt).ShouldNot(ContainSubstring("SELECT ? AS kind"))
+
+		_, err = nameKindSQL(config.QueryLogTypePostgresql, topHourSec, 9, questionNameCol)
+		Expect(err).Should(HaveOccurred())
+	})
+})
+
 func databaseBytes(db *gorm.DB) (int64, error) {
 	if err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
 		return 0, err

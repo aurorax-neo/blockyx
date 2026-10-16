@@ -378,13 +378,14 @@ func (r *DBReader) loadNames(ctx context.Context, step int, lower, upper int64) 
 func (r *DBReader) loadNameKind(
 	ctx context.Context, step, kind int, nameExpr string, lower, upper int64,
 ) ([]topRow, error) {
-	bucket := entryBucketSQL(r.dbType, step)
-	stmt := "SELECT ? AS kind, " + bucket + " AS bucket_sec, " + nameExpr + " AS name, COUNT(*) AS total, " +
-		blockedCaseSQL() + " AS blocked FROM log_entries WHERE request_ts >= ? AND request_ts < ? " +
-		"AND " + nameExpr + " IS NOT NULL AND " + nameExpr + " <> '' GROUP BY " + bucket + ", " + nameExpr
+	stmt, err := nameKindSQL(r.dbType, step, kind, nameExpr)
+	if err != nil {
+		return nil, err
+	}
+
 	var scanned []topScanRow
-	err := r.db.WithContext(ctx).Raw(
-		stmt, kind, time.Unix(lower, 0).UTC(), time.Unix(upper, 0).UTC(),
+	err = r.db.WithContext(ctx).Raw(
+		stmt, time.Unix(lower, 0).UTC(), time.Unix(upper, 0).UTC(),
 	).Scan(&scanned).Error
 	if err != nil {
 		return nil, wrapBackfillErr(ctx, err)

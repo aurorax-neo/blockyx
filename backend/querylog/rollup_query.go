@@ -208,21 +208,15 @@ func topModeOf(f *Filter) int {
 func (r *DBReader) rollupTop(
 	f *Filter, byClient bool, blockedOnly bool, limit, offset int,
 ) ([]TopEntry, int, error) {
-	rows, err := r.queryRollupTop(f, byClient, blockedOnly, limit+1, offset)
+	rows, err := r.queryRollupTop(f, byClient, blockedOnly, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(rows) <= limit {
-		return rollupTopItems(rows), offset + len(rows), nil
+	if len(rows) == 0 {
+		return nil, 0, nil
 	}
 
-	rows = rows[:limit]
-	total, countErr := r.rollupTopCount(f, byClient, blockedOnly, offset+topCountSlack)
-	if countErr != nil || total <= 0 {
-		return rollupTopItems(rows), offset + limit + 1, nil
-	}
-
-	return rollupTopItems(rows), total, nil
+	return rollupTopItems(rows), int(rows[0].TotalCount), nil
 }
 
 func (r *DBReader) queryRollupTop(
@@ -237,16 +231,6 @@ func (r *DBReader) queryRollupTop(
 	return rows, err
 }
 
-func (r *DBReader) rollupTopCount(f *Filter, byClient bool, blockedOnly bool, maxScan int) (int, error) {
-	body, args := r.topBodySQL(f, byClient, blockedOnly)
-	stmt := "SELECT COUNT(*) FROM (SELECT 1 " + body + " LIMIT ?) AS sub"
-	args = append(args, maxScan)
-	var n rollupInt
-	err := r.db.WithContext(context.Background()).Raw(stmt, args...).Row().Scan(&n)
-
-	return int(n), err
-}
-
 func (r *DBReader) topSelectSQL(f *Filter, byClient, blockedOnly bool) (string, []any) {
 	body, args := r.topBodySQL(f, byClient, blockedOnly)
 	totalExpr := "SUM(total)"
@@ -254,7 +238,7 @@ func (r *DBReader) topSelectSQL(f *Filter, byClient, blockedOnly bool) (string, 
 		totalExpr = "SUM(blocked)"
 	}
 
-	return "SELECT name, " + totalExpr + " AS total, SUM(blocked) AS blocked " + body, args
+	return "SELECT name, " + totalExpr + " AS total, SUM(blocked) AS blocked, COUNT(*) OVER () AS total_count " + body, args
 }
 
 func (r *DBReader) topBodySQL(f *Filter, byClient, blockedOnly bool) (string, []any) {
