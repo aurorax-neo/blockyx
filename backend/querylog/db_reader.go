@@ -205,7 +205,7 @@ func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket
 	selectClause := fmt.Sprintf("%s AS bucket_sec, COUNT(*) AS total, SUM(CASE WHEN response_type IN ('BLOCKED', 'REBIND') THEN 1 ELSE 0 END) AS blocked, SUM(CASE WHEN response_type = 'CACHED' THEN 1 ELSE 0 END) AS cached", bucketExpr)
 	err := r.applyFilter(r.db.Model(&logEntry{}), f).
 		Select(selectClause).
-		Group("bucket_sec").
+		Group(bucketExpr).
 		Order("bucket_sec ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -354,7 +354,7 @@ func (r *DBReader) Top(f *Filter, byClient bool, blockedOnly bool, limit, offset
 		maxScan := offset + 101
 		cq := r.applyFilter(r.db.Model(&logEntry{}), f).Where(filterCond)
 		if blockedOnly {
-			cq = cq.Where("response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%'")
+			cq = cq.Where("response_type IN ('BLOCKED', 'REBIND')")
 		}
 		subQuery := cq.Select("1").Group(nameExpr).Limit(maxScan)
 		var boundedCount int64
