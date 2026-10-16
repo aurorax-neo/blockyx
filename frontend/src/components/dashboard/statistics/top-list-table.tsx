@@ -66,7 +66,8 @@ export function TopListTable({
       icon={config.icon}
       items={query.data?.items ?? []}
       totalCount={query.data?.totalCount ?? 0}
-      isLoading={query.isLoading || query.isPlaceholderData}
+      isLoading={query.isLoading && !query.data}
+      isRefreshing={query.isFetching && Boolean(query.data)}
       filter={filter}
       onFilterChange={handleFilterChange}
       page={page}

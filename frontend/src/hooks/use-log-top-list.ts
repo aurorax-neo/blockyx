@@ -31,14 +31,19 @@ function rangeToMs(range: TimeRange): number {
 
 export function useLogTopList(options: TopListOptions, enabled = true) {
   const client = useMemo(() => createApiClient(), []);
-  const to = useMemo(() => new Date().toISOString(), [options.range]);
+  const alignedNow = Math.floor(Date.now() / 30_000) * 30_000;
+  const to = useMemo(
+    () => new Date(alignedNow).toISOString(),
+    [options.range, alignedNow],
+  );
   const from = useMemo(
-    () => new Date(Date.now() - rangeToMs(options.range)).toISOString(),
-    [options.range, to],
+    () => new Date(alignedNow - rangeToMs(options.range)).toISOString(),
+    [options.range, alignedNow],
   );
 
   const query = useQuery({
     queryKey: ["querylog", "top", options, from, to],
+    placeholderData: (previousData) => previousData,
     queryFn: async () => {
       const result = await fetchLogTop(
         client,

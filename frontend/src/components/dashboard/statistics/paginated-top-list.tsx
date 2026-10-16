@@ -20,6 +20,7 @@ interface PaginatedTopListProps {
   items: PaginatedTopListItem[];
   totalCount: number;
   isLoading: boolean;
+  isRefreshing?: boolean;
   filter: TopListFilter;
   onFilterChange: (filter: TopListFilter) => void;
   page: number;
@@ -158,6 +159,7 @@ export function PaginatedTopList({
   items,
   totalCount,
   isLoading,
+  isRefreshing,
   filter,
   onFilterChange,
   page,
@@ -173,6 +175,7 @@ export function PaginatedTopList({
       icon={icon}
       filterControls={{ value: filter, onChange: onFilterChange }}
       isLoading={isLoading}
+      isRefreshing={isRefreshing}
       isEmpty={items.length === 0}
       skeletonRows={limit}
       footer={

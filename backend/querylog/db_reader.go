@@ -165,7 +165,15 @@ func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket
 	case config.QueryLogTypeMysql:
 		bucketExpr = fmt.Sprintf("(FLOOR(UNIX_TIMESTAMP(request_ts) / %d) * %d)", intervalSec, intervalSec)
 	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
-		bucketExpr = fmt.Sprintf("(floor(extract(epoch from request_ts) / %d) * %d)", intervalSec, intervalSec)
+		if intervalSec == 3600 {
+			bucketExpr = "extract(epoch from date_trunc('hour', request_ts))::bigint"
+		} else if intervalSec == 86400 {
+			bucketExpr = "extract(epoch from date_trunc('day', request_ts))::bigint"
+		} else if intervalSec == 60 {
+			bucketExpr = "extract(epoch from date_trunc('minute', request_ts))::bigint"
+		} else {
+			bucketExpr = fmt.Sprintf("(floor(extract(epoch from request_ts) / %d) * %d)::bigint", intervalSec, intervalSec)
+		}
 	default: // SQLite and others
 		bucketExpr = fmt.Sprintf("(cast(strftime('%%s', request_ts) as integer) / %d) * %d", intervalSec, intervalSec)
 	}
@@ -308,22 +316,36 @@ func (r *DBReader) Top(f *Filter, byClient bool, blockedOnly bool, limit, offset
 		q = q.Where("response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%'")
 	}
 
-	var totalDistinct int64
-	err := q.Select("COUNT(DISTINCT " + nameExpr + ")").Row().Scan(&totalDistinct)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	var rows []topRow
 	selectClause := fmt.Sprintf("%s AS name, COUNT(*) AS total, SUM(CASE WHEN response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%%' THEN 1 ELSE 0 END) AS blocked", nameExpr)
-	err = q.Select(selectClause).
+	err := q.Select(selectClause).
 		Group(nameExpr).
 		Order("total DESC, name ASC").
-		Limit(limit).
+		Limit(limit + 1).
 		Offset(offset).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, 0, err
+	}
+
+	var totalDistinct int64
+	if len(rows) <= limit {
+		totalDistinct = int64(offset + len(rows))
+	} else {
+		rows = rows[:limit]
+
+		maxScan := offset + 101
+		cq := r.applyFilter(r.db.Model(&logEntry{}), f).Where(filterCond)
+		if blockedOnly {
+			cq = cq.Where("response_type = 'BLOCKED' OR reason LIKE 'BLOCKED%'")
+		}
+		subQuery := cq.Select("1").Group(nameExpr).Limit(maxScan)
+		var boundedCount int64
+		if err := r.db.Table("(?) as sub", subQuery).Count(&boundedCount).Error; err == nil && boundedCount > 0 {
+			totalDistinct = boundedCount
+		} else {
+			totalDistinct = int64(offset + limit + 1)
+		}
 	}
 
 	items := make([]TopEntry, 0, len(rows))

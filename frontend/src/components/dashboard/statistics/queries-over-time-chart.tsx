@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Loader2 } from "lucide-react";
 import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "~/components/ui/button";
@@ -118,7 +118,6 @@ function InteractiveLegend({
 function ChartSkeleton() {
   const rawSheenId = useId();
   const sheenId = `chart-loading-sheen-${rawSheenId.replaceAll(":", "")}`;
-
   return (
     <div
       className="relative h-[220px] w-full text-muted-foreground sm:h-[250px]"
@@ -235,10 +234,11 @@ export function QueriesOverTimeChart({
     }
   }, [range]);
 
-  const to = useMemo(() => new Date().toISOString(), [range]);
+  const alignedNow = Math.floor(Date.now() / 30_000) * 30_000;
+  const to = useMemo(() => new Date(alignedNow).toISOString(), [range, alignedNow]);
   const from = useMemo(
-    () => new Date(Date.now() - rangeMs).toISOString(),
-    [rangeMs, to],
+    () => new Date(alignedNow - rangeMs).toISOString(),
+    [rangeMs, alignedNow],
   );
 
   const connected = useQuery({
@@ -251,6 +251,7 @@ export function QueriesOverTimeChart({
       from,
       to,
     ],
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
       fetchLogOverTime(
         client,
@@ -263,7 +264,7 @@ export function QueriesOverTimeChart({
         interval,
       ),
   });
-  const { isLoading, isPlaceholderData } = connected;
+  const { isLoading } = connected;
   const rawData = connected.data?.items;
   const data = useMemo(() => {
     if (!rawData || rawData.length === 0) {
@@ -309,7 +310,9 @@ export function QueriesOverTimeChart({
     }
     return filled;
   }, [rawData, from, to, interval]);
-  const showLoading = isLoading || isPlaceholderData;
+
+  const showLoading = isLoading && !connected.data;
+  const isRefreshing = connected.isFetching && Boolean(connected.data);
 
   const clearFilter = useCallback(() => setFilter(null), []);
   return (
@@ -317,6 +320,7 @@ export function QueriesOverTimeChart({
       range={range}
       data={data}
       isLoading={showLoading}
+      isRefreshing={isRefreshing}
       controls={
         <>
           <ChartFilterCombobox
@@ -343,6 +347,7 @@ export function TrafficChart({
   range,
   data,
   isLoading,
+  isRefreshing,
   series = SERIES_KEYS,
   controls,
   activeFilter,
@@ -352,6 +357,7 @@ export function TrafficChart({
     | { time: string; total: number; blocked: number; cached?: number }[]
     | undefined;
   isLoading: boolean;
+  isRefreshing?: boolean;
   series?: SeriesKey[];
   controls?: ReactNode;
   activeFilter?: ReactNode;
@@ -503,6 +509,9 @@ export function TrafficChart({
               <CardTitle className="flex items-center gap-2 font-medium text-base">
                 <BarChart3 className="h-5 w-5" />
                 Queries over time
+                {isRefreshing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
+                ) : null}
               </CardTitle>
               <CardDescription>
                 DNS query volume and blocking activity
@@ -517,7 +526,17 @@ export function TrafficChart({
           {activeFilter}
         </div>
       </CardHeader>
-      <CardContent className="min-w-0">{renderChart()}</CardContent>
+      <CardContent className="min-w-0">
+        <div
+          className={
+            isRefreshing
+              ? "opacity-60 transition-opacity duration-200"
+              : "transition-opacity duration-200"
+          }
+        >
+          {renderChart()}
+        </div>
+      </CardContent>
     </Card>
   );
 }

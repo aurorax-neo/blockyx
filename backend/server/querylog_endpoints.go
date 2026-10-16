@@ -19,6 +19,8 @@ import (
 	"github.com/0xERR0R/blocky/config"
 	"github.com/0xERR0R/blocky/querylog"
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
+	"sync"
 )
 
 var errQueryLogUnsupported = errors.New("query log API requires csv, sqlite, mysql, postgresql or timescale log type")
@@ -33,10 +35,56 @@ type queryLogSource interface {
 	queryTypes(filter *querylog.Filter) ([]queryTypeCount, error)
 }
 
+type queryLogCacheItem struct {
+	data      any
+	expiresAt time.Time
+}
+
+type queryLogCache struct {
+	mu    sync.RWMutex
+	items map[string]queryLogCacheItem
+	sf    singleflight.Group
+}
+
+func newQueryLogCache() *queryLogCache {
+	return &queryLogCache{
+		items: make(map[string]queryLogCacheItem),
+	}
+}
+
+func (c *queryLogCache) get(key string) (any, bool) {
+	c.mu.RLock()
+	item, ok := c.items[key]
+	c.mu.RUnlock()
+	if !ok || time.Now().After(item.expiresAt) {
+		return nil, false
+	}
+
+	return item.data, true
+}
+
+func (c *queryLogCache) set(key string, data any, ttl time.Duration) {
+	c.mu.Lock()
+	if len(c.items) > 500 {
+		now := time.Now()
+		for k, v := range c.items {
+			if now.After(v.expiresAt) {
+				delete(c.items, k)
+			}
+		}
+	}
+	c.items[key] = queryLogCacheItem{
+		data:      data,
+		expiresAt: time.Now().Add(ttl),
+	}
+	c.mu.Unlock()
+}
+
 // queryLogHandler serves the query log endpoints.
 type queryLogHandler struct {
 	source  queryLogSource
 	logType config.QueryLogType
+	cache   *queryLogCache
 }
 
 func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
@@ -45,6 +93,7 @@ func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
 		return &queryLogHandler{
 			source:  &csvSource{dir: cfg.QueryLog.Target.Reveal()},
 			logType: cfg.QueryLog.Type,
+			cache:   newQueryLogCache(),
 		}, nil
 	case config.QueryLogTypeSqlite, config.QueryLogTypeMysql,
 		config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
@@ -56,6 +105,7 @@ func newQueryLogHandler(cfg *config.Config) (*queryLogHandler, error) {
 		return &queryLogHandler{
 			source:  &dbSource{reader: db},
 			logType: cfg.QueryLog.Type,
+			cache:   newQueryLogCache(),
 		}, nil
 	default:
 		return nil, errQueryLogUnsupported
@@ -595,112 +645,207 @@ func (h *queryLogHandler) rows(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/count
 func (h *queryLogHandler) count(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseQueryLogFilter(r)
-	if err != nil {
-		writeQueryLogError(w, http.StatusBadRequest, "invalid time range: "+err.Error())
+	key := r.URL.RequestURI()
+	if val, ok := h.cache.get(key); ok {
+		writeQueryLogJSON(w, http.StatusOK, val)
 
 		return
 	}
 
-	total, err := h.source.count(filter)
+	res, err, _ := h.cache.sf.Do(key, func() (any, error) {
+		if val, ok := h.cache.get(key); ok {
+			return val, nil
+		}
+
+		filter, err := parseQueryLogFilter(r)
+		if err != nil {
+			return nil, err
+		}
+
+		total, err := h.source.count(filter)
+		if err != nil {
+			return nil, err
+		}
+
+		data := map[string]any{"total": total}
+		h.cache.set(key, data, 10*time.Second)
+
+		return data, nil
+	})
 	if err != nil {
 		writeQueryLogError(w, http.StatusInternalServerError, err.Error())
 
 		return
 	}
 
-	writeQueryLogJSON(w, http.StatusOK, map[string]any{"total": total})
+	writeQueryLogJSON(w, http.StatusOK, res)
 }
 
 // GET /api/querylog/over-time?interval=1h
 func (h *queryLogHandler) overTime(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseQueryLogFilter(r)
-	if err != nil {
-		writeQueryLogError(w, http.StatusBadRequest, "invalid time range: "+err.Error())
+	key := r.URL.RequestURI()
+	if val, ok := h.cache.get(key); ok {
+		writeQueryLogJSON(w, http.StatusOK, val)
 
 		return
 	}
 
-	interval, err := time.ParseDuration(r.URL.Query().Get("interval"))
-	if err != nil || interval <= 0 {
-		interval = time.Hour
-	}
+	res, err, _ := h.cache.sf.Do(key, func() (any, error) {
+		if val, ok := h.cache.get(key); ok {
+			return val, nil
+		}
 
-	items, err := h.source.overTime(filter, interval)
+		filter, err := parseQueryLogFilter(r)
+		if err != nil {
+			return nil, err
+		}
+
+		interval, err := time.ParseDuration(r.URL.Query().Get("interval"))
+		if err != nil || interval <= 0 {
+			interval = time.Hour
+		}
+
+		items, err := h.source.overTime(filter, interval)
+		if err != nil {
+			return nil, err
+		}
+
+		data := map[string]any{"items": items}
+		h.cache.set(key, data, 15*time.Second)
+
+		return data, nil
+	})
 	if err != nil {
 		writeQueryLogError(w, http.StatusInternalServerError, err.Error())
 
 		return
 	}
 
-	writeQueryLogJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeQueryLogJSON(w, http.StatusOK, res)
 }
 
 // GET /api/querylog/top?type=domains|clients&filter=all|blocked
 func (h *queryLogHandler) top(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseQueryLogFilter(r)
-	if err != nil {
-		writeQueryLogError(w, http.StatusBadRequest, "invalid time range: "+err.Error())
+	key := r.URL.RequestURI()
+	if val, ok := h.cache.get(key); ok {
+		writeQueryLogJSON(w, http.StatusOK, val)
 
 		return
 	}
 
-	byClient := r.URL.Query().Get("type") == "clients"
-	blockedOnly := r.URL.Query().Get("filter") == "blocked"
-	limit := queryInt(r, "limit", 10)
-	offset := queryInt(r, "offset", 0)
+	res, err, _ := h.cache.sf.Do(key, func() (any, error) {
+		if val, ok := h.cache.get(key); ok {
+			return val, nil
+		}
 
-	items, totalCount, err := h.source.top(filter, byClient, blockedOnly, limit, offset)
+		filter, err := parseQueryLogFilter(r)
+		if err != nil {
+			return nil, err
+		}
+
+		byClient := r.URL.Query().Get("type") == "clients"
+		blockedOnly := r.URL.Query().Get("filter") == "blocked"
+		limit := queryInt(r, "limit", 10)
+		offset := queryInt(r, "offset", 0)
+
+		items, totalCount, err := h.source.top(filter, byClient, blockedOnly, limit, offset)
+		if err != nil {
+			return nil, err
+		}
+
+		data := map[string]any{
+			"items":      items,
+			"totalCount": totalCount,
+		}
+		h.cache.set(key, data, 15*time.Second)
+
+		return data, nil
+	})
 	if err != nil {
 		writeQueryLogError(w, http.StatusInternalServerError, err.Error())
 
 		return
 	}
 
-	writeQueryLogJSON(w, http.StatusOK, map[string]any{
-		"items":      items,
-		"totalCount": totalCount,
-	})
+	writeQueryLogJSON(w, http.StatusOK, res)
 }
 
 // GET /api/querylog/search?type=domains|clients&q=
 func (h *queryLogHandler) search(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseQueryLogFilter(r)
-	if err != nil {
-		writeQueryLogError(w, http.StatusBadRequest, "invalid time range: "+err.Error())
+	key := r.URL.RequestURI()
+	if val, ok := h.cache.get(key); ok {
+		writeQueryLogJSON(w, http.StatusOK, val)
 
 		return
 	}
 
-	byClient := r.URL.Query().Get("type") == "clients"
-	q := r.URL.Query().Get("q")
-	limit := queryInt(r, "limit", 50)
+	res, err, _ := h.cache.sf.Do(key, func() (any, error) {
+		if val, ok := h.cache.get(key); ok {
+			return val, nil
+		}
 
-	items, err := h.source.search(filter, byClient, q, limit)
+		filter, err := parseQueryLogFilter(r)
+		if err != nil {
+			return nil, err
+		}
+
+		byClient := r.URL.Query().Get("type") == "clients"
+		q := r.URL.Query().Get("q")
+		limit := queryInt(r, "limit", 50)
+
+		items, err := h.source.search(filter, byClient, q, limit)
+		if err != nil {
+			return nil, err
+		}
+
+		data := map[string]any{"items": items}
+		h.cache.set(key, data, 30*time.Second)
+
+		return data, nil
+	})
 	if err != nil {
 		writeQueryLogError(w, http.StatusInternalServerError, err.Error())
 
 		return
 	}
 
-	writeQueryLogJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeQueryLogJSON(w, http.StatusOK, res)
 }
 
 // GET /api/querylog/query-types
 func (h *queryLogHandler) queryTypes(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseQueryLogFilter(r)
-	if err != nil {
-		writeQueryLogError(w, http.StatusBadRequest, "invalid time range: "+err.Error())
+	key := r.URL.RequestURI()
+	if val, ok := h.cache.get(key); ok {
+		writeQueryLogJSON(w, http.StatusOK, val)
 
 		return
 	}
 
-	items, err := h.source.queryTypes(filter)
+	res, err, _ := h.cache.sf.Do(key, func() (any, error) {
+		if val, ok := h.cache.get(key); ok {
+			return val, nil
+		}
+
+		filter, err := parseQueryLogFilter(r)
+		if err != nil {
+			return nil, err
+		}
+
+		items, err := h.source.queryTypes(filter)
+		if err != nil {
+			return nil, err
+		}
+
+		data := map[string]any{"items": items}
+		h.cache.set(key, data, 15*time.Second)
+
+		return data, nil
+	})
 	if err != nil {
 		writeQueryLogError(w, http.StatusInternalServerError, err.Error())
 
 		return
 	}
 
-	writeQueryLogJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeQueryLogJSON(w, http.StatusOK, res)
 }

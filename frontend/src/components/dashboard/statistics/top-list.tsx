@@ -1,6 +1,6 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
+import { type LucideIcon, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback } from "react";
 
@@ -88,6 +88,7 @@ interface TopListCardProps {
   icon: LucideIcon;
   filterControls?: TopListFilterControls;
   isLoading: boolean;
+  isRefreshing?: boolean;
   isEmpty: boolean;
   skeletonRows: number;
   footer?: ReactNode;
@@ -100,6 +101,7 @@ export function TopListCard({
   icon: Icon,
   filterControls,
   isLoading,
+  isRefreshing,
   isEmpty,
   skeletonRows,
   footer,
@@ -133,13 +135,26 @@ export function TopListCard({
             <CardTitle className="flex items-center gap-2 font-medium text-base">
               <Icon className="h-5 w-5" />
               {title}
+              {isRefreshing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
+              ) : null}
             </CardTitle>
             <CardDescription>{description}</CardDescription>
           </div>
           {filterControls ? <TopListFilterToggle {...filterControls} /> : null}
         </div>
       </CardHeader>
-      <CardContent className="flex-1">{content}</CardContent>
+      <CardContent className="flex-1">
+        <div
+          className={
+            isRefreshing
+              ? "opacity-60 transition-opacity duration-200"
+              : "transition-opacity duration-200"
+          }
+        >
+          {content}
+        </div>
+      </CardContent>
       {footer}
     </Card>
   );

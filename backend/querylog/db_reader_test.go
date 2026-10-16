@@ -71,7 +71,11 @@ var _ = Describe("DBReader Aggregations", func() {
 		Expect(topDomains).Should(HaveLen(3))
 		Expect(topDomains[0].Name).Should(Equal("example.com"))
 		Expect(topDomains[0].Total).Should(Equal(2))
-
+		// Test Top Domains pagination (limit < total)
+		topPaged, pagedTotal, err := reader.Top(filter, false, false, 1, 0)
+		Expect(err).Should(Succeed())
+		Expect(topPaged).Should(HaveLen(1))
+		Expect(pagedTotal).Should(Equal(3))
 		// Test Top Clients
 		topClients, clientCount, err := reader.Top(filter, true, false, 10, 0)
 		Expect(err).Should(Succeed())
