@@ -55,8 +55,22 @@ func NewDBReader(ctx context.Context, dbType config.QueryLogType, target string)
 	if err != nil {
 		return nil, fmt.Errorf("can't open query log database: %w", err)
 	}
+	reader := &DBReader{db: db, dbType: dbType}
+	reader.ensureIndexes()
 
-	return &DBReader{db: db, dbType: dbType}, nil
+	return reader, nil
+}
+
+func (r *DBReader) ensureIndexes() {
+	tableName := "log_entries"
+	switch r.dbType {
+	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale, config.QueryLogTypeSqlite:
+		_ = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_log_entries_ts_qname ON " + tableName + " (request_ts, question_name)").Error
+		_ = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_log_entries_ts_client ON " + tableName + " (request_ts, client_name, client_ip)").Error
+	case config.QueryLogTypeMysql:
+		_ = r.db.Exec("CREATE INDEX idx_log_entries_ts_qname ON `" + tableName + "` (request_ts, question_name)").Error
+		_ = r.db.Exec("CREATE INDEX idx_log_entries_ts_client ON `" + tableName + "` (request_ts, client_name, client_ip)").Error
+	}
 }
 
 // applyFilter adds WHERE clauses for the given filter.
@@ -166,13 +180,13 @@ func (r *DBReader) OverTime(f *Filter, interval time.Duration) ([]OverTimeBucket
 		bucketExpr = fmt.Sprintf("(FLOOR(UNIX_TIMESTAMP(request_ts) / %d) * %d)", intervalSec, intervalSec)
 	case config.QueryLogTypePostgresql, config.QueryLogTypeTimescale:
 		if intervalSec == 3600 {
-			bucketExpr = "extract(epoch from date_trunc('hour', request_ts))::bigint"
+			bucketExpr = "extract(epoch from date_trunc('hour', request_ts AT TIME ZONE 'UTC'))::bigint"
 		} else if intervalSec == 86400 {
-			bucketExpr = "extract(epoch from date_trunc('day', request_ts))::bigint"
+			bucketExpr = "extract(epoch from date_trunc('day', request_ts AT TIME ZONE 'UTC'))::bigint"
 		} else if intervalSec == 60 {
-			bucketExpr = "extract(epoch from date_trunc('minute', request_ts))::bigint"
+			bucketExpr = "extract(epoch from date_trunc('minute', request_ts AT TIME ZONE 'UTC'))::bigint"
 		} else {
-			bucketExpr = fmt.Sprintf("(floor(extract(epoch from request_ts) / %d) * %d)::bigint", intervalSec, intervalSec)
+			bucketExpr = fmt.Sprintf("(floor(extract(epoch from (request_ts AT TIME ZONE 'UTC')) / %d) * %d)::bigint", intervalSec, intervalSec)
 		}
 	default: // SQLite and others
 		bucketExpr = fmt.Sprintf("(cast(strftime('%%s', request_ts) as integer) / %d) * %d", intervalSec, intervalSec)

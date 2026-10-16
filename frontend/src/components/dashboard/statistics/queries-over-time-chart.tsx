@@ -298,7 +298,12 @@ export function QueriesOverTimeChart({
     for (let t = startMs; t <= endMs; t += stepMs) {
       const existing = map.get(t);
       if (existing) {
-        filled.push(existing);
+        filled.push({
+          time: new Date(t).toISOString(),
+          total: Number(existing.total ?? 0),
+          blocked: Number(existing.blocked ?? 0),
+          cached: Number(existing.cached ?? 0),
+        });
       } else {
         filled.push({
           time: new Date(t).toISOString(),
@@ -456,7 +461,8 @@ export function TrafficChart({
             axisLine={false}
             tickMargin={8}
             fontSize={12}
-            interval={timeRangeConfig[range].tickInterval}
+            interval="preserveStartEnd"
+            minTickGap={16}
           />
           <YAxis
             tickLine={false}
@@ -494,6 +500,8 @@ export function TrafficChart({
                 fill={`var(--color-${key})`}
                 fillOpacity={0.2}
                 strokeWidth={2}
+                connectNulls={true}
+                isAnimationActive={false}
               />
             ))}
         </AreaChart>

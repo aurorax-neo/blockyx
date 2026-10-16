@@ -80,6 +80,24 @@ func (c *queryLogCache) set(key string, data any, ttl time.Duration) {
 	c.mu.Unlock()
 }
 
+func normalizeCacheKey(r *http.Request) string {
+	q := r.URL.Query()
+	if from := q.Get("from"); from != "" {
+		if t, err := time.Parse(time.RFC3339, from); err == nil {
+			rounded := time.Unix((t.Unix()/30)*30, 0).UTC().Format(time.RFC3339)
+			q.Set("from", rounded)
+		}
+	}
+	if to := q.Get("to"); to != "" {
+		if t, err := time.Parse(time.RFC3339, to); err == nil {
+			rounded := time.Unix((t.Unix()/30)*30, 0).UTC().Format(time.RFC3339)
+			q.Set("to", rounded)
+		}
+	}
+
+	return r.URL.Path + "?" + q.Encode()
+}
+
 // queryLogHandler serves the query log endpoints.
 type queryLogHandler struct {
 	source  queryLogSource
@@ -645,7 +663,7 @@ func (h *queryLogHandler) rows(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/count
 func (h *queryLogHandler) count(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.RequestURI()
+	key := normalizeCacheKey(r)
 	if val, ok := h.cache.get(key); ok {
 		writeQueryLogJSON(w, http.StatusOK, val)
 
@@ -683,7 +701,7 @@ func (h *queryLogHandler) count(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/over-time?interval=1h
 func (h *queryLogHandler) overTime(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.RequestURI()
+	key := normalizeCacheKey(r)
 	if val, ok := h.cache.get(key); ok {
 		writeQueryLogJSON(w, http.StatusOK, val)
 
@@ -726,7 +744,7 @@ func (h *queryLogHandler) overTime(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/top?type=domains|clients&filter=all|blocked
 func (h *queryLogHandler) top(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.RequestURI()
+	key := normalizeCacheKey(r)
 	if val, ok := h.cache.get(key); ok {
 		writeQueryLogJSON(w, http.StatusOK, val)
 
@@ -772,7 +790,7 @@ func (h *queryLogHandler) top(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/search?type=domains|clients&q=
 func (h *queryLogHandler) search(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.RequestURI()
+	key := normalizeCacheKey(r)
 	if val, ok := h.cache.get(key); ok {
 		writeQueryLogJSON(w, http.StatusOK, val)
 
@@ -814,7 +832,7 @@ func (h *queryLogHandler) search(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/querylog/query-types
 func (h *queryLogHandler) queryTypes(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.RequestURI()
+	key := normalizeCacheKey(r)
 	if val, ok := h.cache.get(key); ok {
 		writeQueryLogJSON(w, http.StatusOK, val)
 
